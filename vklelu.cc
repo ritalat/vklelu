@@ -16,15 +16,15 @@
 
 #define REQUIRED_VK_VERSION_MINOR 3
 
-#define VK_CHECK(x)                                                                       \
-    do                                                                                    \
-    {                                                                                     \
-        VkResult err = x;                                                                 \
-        if (err)                                                                          \
-        {                                                                                 \
-            printf("Detected Vulkan error %d at %s:%d.\n", int(err), __FILE__, __LINE__); \
-            abort();                                                                      \
-        }                                                                                 \
+#define VK_CHECK(x)                                                                                \
+    do                                                                                             \
+    {                                                                                              \
+        VkResult err = x;                                                                          \
+        if (err)                                                                                   \
+        {                                                                                          \
+            fprintf(stderr, "Detected Vulkan error %d at %s:%d.\n", int(err), __FILE__, __LINE__); \
+            abort();                                                                               \
+        }                                                                                          \
     } while (0)
 
 VKlelu::VKlelu(int argc, char *argv[]):
@@ -39,7 +39,7 @@ VKlelu::VKlelu(int argc, char *argv[]):
     (void)argv;
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        printf("Failed to init SDL\n");
+        fprintf(stderr, "Failed to init SDL\n");
         return;
     }
 
@@ -49,18 +49,18 @@ VKlelu::VKlelu(int argc, char *argv[]):
                               WINDOW_WIDTH, WINDOW_HEIGHT,
                               SDL_WINDOW_VULKAN);
     if (!window) {
-        printf("Failed to create SDL window\n");
+        fprintf(stderr, "Failed to create SDL window\n");
         return;
     }
 
-    printf("Window size: %ux%u\n", WINDOW_WIDTH, WINDOW_HEIGHT);
+    fprintf(stderr, "Window size: %ux%u\n", WINDOW_WIDTH, WINDOW_HEIGHT);
 }
 
 VKlelu::~VKlelu()
 {
     vkDeviceWaitIdle(device);
 
-    vkDestroySemaphore(device, presentSemaphore, nullptr);
+    vkDestroySemaphore(device, imageAcquiredSemaphore, nullptr);
     vkDestroySemaphore(device, renderSemaphore, nullptr);
     vkDestroyFence(device, renderFence, nullptr);
 
@@ -100,21 +100,6 @@ int VKlelu::run()
     if (!init_vulkan())
         return EXIT_FAILURE;
 
-    if (!init_swapchain())
-        return EXIT_FAILURE;
-
-    if (!init_commands())
-        return EXIT_FAILURE;
-
-    if (!init_default_renderpass())
-        return EXIT_FAILURE;
-
-    if (!init_framebuffers())
-        return EXIT_FAILURE;
-
-    if (!init_sync_structures())
-        return EXIT_FAILURE;
-
     bool quit = false;
     SDL_Event event;
 
@@ -129,79 +114,84 @@ int VKlelu::run()
             }
         }
 
-        VK_CHECK(vkWaitForFences(device, 1, &renderFence, true, 1000000000));
-        VK_CHECK(vkResetFences(device, 1, &renderFence));
-
-        uint32_t swapchainImageIndex;
-        VK_CHECK(vkAcquireNextImageKHR(device, swapchain, 1000000000, presentSemaphore, nullptr, &swapchainImageIndex));
-
-        VK_CHECK(vkResetCommandBuffer(mainCommandBuffer, 0));
-
-        VkCommandBuffer cmd = mainCommandBuffer;
-
-        VkCommandBufferBeginInfo cmdBeginInfo = {};
-        cmdBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        cmdBeginInfo.pNext = nullptr;
-        cmdBeginInfo.pInheritanceInfo = nullptr;
-        cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
-        VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
-
-        VkClearValue clearValue;
-        float flash = abs(sin(frameCount / 120.0f));
-        clearValue.color = { { 0.0f, 0.0f, flash, 1.0f } };
-
-        VkExtent2D extent;
-        extent.height = WINDOW_HEIGHT;
-        extent.width = WINDOW_WIDTH;
-
-        VkRenderPassBeginInfo rpInfo = {};
-        rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpInfo.pNext = nullptr;
-        rpInfo.renderPass = renderPass;
-        rpInfo.renderArea.offset.x = 0;
-        rpInfo.renderArea.offset.y = 0;
-        rpInfo.renderArea.extent = extent;
-        rpInfo.framebuffer = framebuffers[swapchainImageIndex];
-        rpInfo.clearValueCount = 1;
-        rpInfo.pClearValues = &clearValue;
-
-        vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdEndRenderPass(cmd);
-
-        VK_CHECK(vkEndCommandBuffer(cmd));
-
-        VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-
-        VkSubmitInfo submit = {};
-        submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-        submit.pNext = nullptr;
-        submit.pWaitDstStageMask = &waitStage;
-        submit.waitSemaphoreCount = 1;
-        submit.pWaitSemaphores = &presentSemaphore;
-        submit.signalSemaphoreCount = 1;
-        submit.pSignalSemaphores = &renderSemaphore;
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &cmd;
-
-        VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submit, renderFence));
-
-        VkPresentInfoKHR presentInfo = {};
-        presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-        presentInfo.pNext = nullptr;
-        presentInfo.swapchainCount = 1;
-        presentInfo.pSwapchains = &swapchain;
-        presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &renderSemaphore;
-        presentInfo.pImageIndices = &swapchainImageIndex;
-
-        VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
-
-        ++frameCount;
+        draw();
     }
 
     return EXIT_SUCCESS;
+}
+
+void VKlelu::draw()
+{
+    VK_CHECK(vkWaitForFences(device, 1, &renderFence, true, 1000000000));
+    VK_CHECK(vkResetFences(device, 1, &renderFence));
+
+    uint32_t swapchainImageIndex;
+    VK_CHECK(vkAcquireNextImageKHR(device, swapchain, 1000000000, imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
+
+    VK_CHECK(vkResetCommandBuffer(mainCommandBuffer, 0));
+
+    VkCommandBuffer cmd = mainCommandBuffer;
+
+    VkCommandBufferBeginInfo cmdBeginInfo = {};
+    cmdBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    cmdBeginInfo.pNext = nullptr;
+    cmdBeginInfo.pInheritanceInfo = nullptr;
+    cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+
+    VkClearValue clearValue;
+    float flash = abs(sin(frameCount / 120.0f));
+    clearValue.color = { { 0.0f, 0.0f, flash, 1.0f } };
+
+    VkExtent2D extent;
+    extent.height = WINDOW_HEIGHT;
+    extent.width = WINDOW_WIDTH;
+
+    VkRenderPassBeginInfo rpInfo = {};
+    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpInfo.pNext = nullptr;
+    rpInfo.renderPass = renderPass;
+    rpInfo.renderArea.offset.x = 0;
+    rpInfo.renderArea.offset.y = 0;
+    rpInfo.renderArea.extent = extent;
+    rpInfo.framebuffer = framebuffers[swapchainImageIndex];
+    rpInfo.clearValueCount = 1;
+    rpInfo.pClearValues = &clearValue;
+
+    vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    vkCmdEndRenderPass(cmd);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+
+    VkSubmitInfo submit = {};
+    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit.pNext = nullptr;
+    submit.pWaitDstStageMask = &waitStage;
+    submit.waitSemaphoreCount = 1;
+    submit.pWaitSemaphores = &imageAcquiredSemaphore;
+    submit.signalSemaphoreCount = 1;
+    submit.pSignalSemaphores = &renderSemaphore;
+    submit.commandBufferCount = 1;
+    submit.pCommandBuffers = &cmd;
+
+    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submit, renderFence));
+
+    VkPresentInfoKHR presentInfo = {};
+    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    presentInfo.pNext = nullptr;
+    presentInfo.swapchainCount = 1;
+    presentInfo.pSwapchains = &swapchain;
+    presentInfo.waitSemaphoreCount = 1;
+    presentInfo.pWaitSemaphores = &renderSemaphore;
+    presentInfo.pImageIndices = &swapchainImageIndex;
+
+    VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
+
+    ++frameCount;
 }
 
 bool VKlelu::init_vulkan()
@@ -213,7 +203,7 @@ bool VKlelu::init_vulkan()
                            .use_default_debug_messenger()
                            .build();
     if (!inst_ret) {
-        printf("Failed to create Vulkan instance. Error: %s\n", inst_ret.error().message().c_str());
+        fprintf(stderr, "Failed to create Vulkan instance. Error: %s\n", inst_ret.error().message().c_str());
         return false;
     }
     vkb::Instance vkb_inst = inst_ret.value();
@@ -221,7 +211,7 @@ bool VKlelu::init_vulkan()
     debugMessenger = vkb_inst.debug_messenger;
 
     if (!SDL_Vulkan_CreateSurface(window, instance, &surface)) {
-        printf("Failed to create Vulkan surface");
+        fprintf(stderr, "Failed to create Vulkan surface");
         return false;
     }
 
@@ -230,7 +220,7 @@ bool VKlelu::init_vulkan()
                             .set_minimum_version(1, REQUIRED_VK_VERSION_MINOR)
                             .select();
     if (!phys_ret) {
-        printf("Failed to select Vulkan physical device. Error: %s\n", phys_ret.error().message().c_str());
+        fprintf(stderr, "Failed to select Vulkan physical device. Error: %s\n", phys_ret.error().message().c_str());
         return false;
     }
     vkb::PhysicalDevice vkb_phys = phys_ret.value();
@@ -239,7 +229,7 @@ bool VKlelu::init_vulkan()
     vkb::DeviceBuilder deviceBuilder{ vkb_phys };
     auto dev_ret = deviceBuilder.build();
     if (!dev_ret) {
-        printf("Failed to create Vulkan device. Error: %s\n", dev_ret.error().message().c_str());
+        fprintf(stderr, "Failed to create Vulkan device. Error: %s\n", dev_ret.error().message().c_str());
         return false;
     }
     vkb::Device vkb_device = dev_ret.value();
@@ -247,13 +237,29 @@ bool VKlelu::init_vulkan()
 
     auto graphics_queue_ret  = vkb_device.get_queue(vkb::QueueType::graphics);
     if (!graphics_queue_ret) {
-        printf("Failed to get graphics queue. Error: %s\n", graphics_queue_ret.error().message().c_str());
+        fprintf(stderr, "Failed to get graphics queue. Error: %s\n", graphics_queue_ret.error().message().c_str());
         return false;
     }
     graphicsQueue = graphics_queue_ret.value();
     graphicsQueueFamily = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
 
-    printf("Vulkan 1.%d initialized successfully\n", REQUIRED_VK_VERSION_MINOR);
+    fprintf(stderr, "Vulkan 1.%d initialized successfully\n", REQUIRED_VK_VERSION_MINOR);
+
+    if (!init_swapchain())
+        return false;
+
+    if (!init_commands())
+        return false;
+
+    if (!init_default_renderpass())
+        return false;
+
+    if (!init_framebuffers())
+        return false;
+
+    if (!init_sync_structures())
+        return false;
+
     return true;
 }
 
@@ -265,7 +271,7 @@ bool VKlelu::init_swapchain()
                                     .set_desired_extent(WINDOW_WIDTH, WINDOW_HEIGHT)
                                     .build();
     if (!swap_ret) {
-        printf("Failed to create Vulkan swapchain. Error: %s\n", swap_ret.error().message().c_str());
+        fprintf(stderr, "Failed to create Vulkan swapchain. Error: %s\n", swap_ret.error().message().c_str());
         return false;
     }
     vkb::Swapchain vkb_swapchain = swap_ret.value();
@@ -274,7 +280,7 @@ bool VKlelu::init_swapchain()
     swapchainImages = vkb_swapchain.get_images().value();
     swapchainImageViews = vkb_swapchain.get_image_views().value();
 
-    printf("Vulkan swapchain initialized successfully\n");
+    fprintf(stderr, "Vulkan swapchain initialized successfully\n");
     return true;
 }
 
@@ -297,7 +303,7 @@ bool VKlelu::init_commands()
 
     VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &mainCommandBuffer));
 
-    printf("Vulkan command pool initialized successfully\n");
+    fprintf(stderr, "Vulkan command pool initialized successfully\n");
     return true;
 }
 
@@ -331,7 +337,7 @@ bool VKlelu::init_default_renderpass()
 
     VK_CHECK(vkCreateRenderPass(device, &render_pass_info, nullptr, &renderPass));
 
-    printf("Vulkan renderpass initialized successfully\n");
+    fprintf(stderr, "Vulkan renderpass initialized successfully\n");
     return true;
 }
 
@@ -354,7 +360,7 @@ bool VKlelu::init_framebuffers()
         VK_CHECK(vkCreateFramebuffer(device, &fb_info, nullptr, &framebuffers[i]));
     }
 
-    printf("Vulkan framebuffers initialized successfully\n");
+    fprintf(stderr, "Vulkan framebuffers initialized successfully\n");
     return true;
 }
 
@@ -372,9 +378,9 @@ bool VKlelu::init_sync_structures()
     semaphoreCreateInfo.pNext = nullptr;
     semaphoreCreateInfo.flags = 0;
 
-    VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &presentSemaphore));
+    VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &imageAcquiredSemaphore));
     VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &renderSemaphore));
 
-    printf("Vulkan sync structures initialized successfully\n");
+    fprintf(stderr, "Vulkan sync structures initialized successfully\n");
     return true;
 }

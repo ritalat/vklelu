@@ -14,6 +14,8 @@ public:
     int run();
 
 private:
+    void draw();
+
     bool init_vulkan();
     bool init_swapchain();
     bool init_commands();
@@ -45,7 +47,7 @@ private:
 
     std::vector<VkFramebuffer> framebuffers;
 
-    VkSemaphore presentSemaphore;
+    VkSemaphore imageAcquiredSemaphore;
     VkSemaphore renderSemaphore;
     VkFence renderFence;
 };
