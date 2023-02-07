@@ -17,9 +17,23 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_INSTALL_BINDIR ".")
 set(CMAKE_INSTALL_LIBDIR ".")
 
-find_package(Vulkan)
-
 add_subdirectory(external)
+
+find_package(Vulkan REQUIRED COMPONENTS glslc)
+
+set(SHADERS triangle.frag
+            triangle.vert)
+
+foreach(SHADER ${SHADERS})
+    set(GLSLC_OUT "${SHADER}.spv")
+    add_custom_command(
+        OUTPUT ${GLSLC_OUT}
+        COMMAND ${Vulkan_GLSLC_EXECUTABLE} ${CMAKE_SOURCE_DIR}/${SHADER} -o ${GLSLC_OUT}
+        DEPENDS ${SHADER})
+    list(APPEND SPIRV_BINARIES ${GLSLC_OUT})
+endforeach()
+
+add_custom_target(Shaders DEPENDS ${SPIRV_BINARIES})
 
 set(SOURCES main.cc
             vklelu.cc)
@@ -37,9 +51,13 @@ if(UNIX)
     set_target_properties(VKlelu PROPERTIES INSTALL_RPATH "\${ORIGIN}")
 endif()
 
+add_dependencies(VKlelu Shaders)
 target_link_libraries(VKlelu Vulkan::Vulkan
                              SDL2::SDL2
                              SDL2::SDL2main
                              vk-bootstrap::vk-bootstrap)
 
 install(TARGETS VKlelu SDL2 RUNTIME DESTINATION ".")
+foreach(SPIRV_BINARY ${SPIRV_BINARIES})
+    install(FILES ${CMAKE_BINARY_DIR}/${SPIRV_BINARY} DESTINATION ".")
+endforeach()
