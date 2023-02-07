@@ -21,7 +21,9 @@ add_subdirectory(external)
 
 find_package(Vulkan REQUIRED COMPONENTS glslc)
 
-set(SHADERS triangle.frag
+set(SHADERS rgb_triangle.frag
+            rgb_triangle.vert
+            triangle.frag
             triangle.vert)
 
 foreach(SHADER ${SHADERS})
@@ -36,9 +38,11 @@ endforeach()
 add_custom_target(Shaders DEPENDS ${SPIRV_BINARIES})
 
 set(SOURCES main.cc
+            utils.cc
             vklelu.cc)
 
-set(HEADERS vklelu.hh)
+set(HEADERS utils.hh
+            vklelu.hh)
 
 add_executable(VKlelu ${SOURCES} ${HEADERS})
 

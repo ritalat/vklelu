@@ -16,14 +16,18 @@ public:
 private:
     void draw();
 
+    bool load_shader(const char *path, VkShaderModule &module);
+
     bool init_vulkan();
     bool init_swapchain();
     bool init_commands();
     bool init_default_renderpass();
     bool init_framebuffers();
     bool init_sync_structures();
+    bool init_pipelines();
 
     int frameCount;
+    int currentShader;
 
     SDL_Window *window;
 
@@ -50,4 +54,8 @@ private:
     VkSemaphore imageAcquiredSemaphore;
     VkSemaphore renderSemaphore;
     VkFence renderFence;
+
+    VkPipeline trianglePipeline;
+    VkPipeline rgbTrianglePipeline;
+    VkPipelineLayout trianglePipelineLayout;
 };

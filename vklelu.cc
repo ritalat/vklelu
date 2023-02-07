@@ -1,34 +1,25 @@
 #include "vklelu.hh"
 
+#include "utils.hh"
+
 #include "SDL.h"
 #include "SDL_vulkan.h"
-
 #include "VkBootstrap.h"
-
 #include "vulkan/vulkan.h"
 
 #include <cstdio>
 #include <cstdlib>
 #include <cmath>
+#include <vector>
 
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 768
 
 #define REQUIRED_VK_VERSION_MINOR 3
 
-#define VK_CHECK(x)                                                                                \
-    do                                                                                             \
-    {                                                                                              \
-        VkResult err = x;                                                                          \
-        if (err)                                                                                   \
-        {                                                                                          \
-            fprintf(stderr, "Detected Vulkan error %d at %s:%d.\n", int(err), __FILE__, __LINE__); \
-            abort();                                                                               \
-        }                                                                                          \
-    } while (0)
-
 VKlelu::VKlelu(int argc, char *argv[]):
     frameCount(0),
+    currentShader(0),
     window(nullptr),
     instance(nullptr),
     surface(nullptr),
@@ -59,6 +50,10 @@ VKlelu::VKlelu(int argc, char *argv[]):
 VKlelu::~VKlelu()
 {
     vkDeviceWaitIdle(device);
+
+    vkDestroyPipelineLayout(device, trianglePipelineLayout, nullptr);
+    vkDestroyPipeline(device, rgbTrianglePipeline, nullptr);
+    vkDestroyPipeline(device, trianglePipeline, nullptr);
 
     vkDestroySemaphore(device, imageAcquiredSemaphore, nullptr);
     vkDestroySemaphore(device, renderSemaphore, nullptr);
@@ -109,6 +104,17 @@ int VKlelu::run()
                 case SDL_QUIT:
                     quit = true;
                     break;
+                case SDL_KEYDOWN:
+                    switch (event.key.keysym.sym) {
+                        case SDLK_SPACE:
+                            ++currentShader;
+                            if (currentShader > 1)
+                                currentShader = 0;
+                            break;
+                        default:
+                            break;
+                    }
+                    break;
                 default:
                     break;
             }
@@ -132,11 +138,7 @@ void VKlelu::draw()
 
     VkCommandBuffer cmd = mainCommandBuffer;
 
-    VkCommandBufferBeginInfo cmdBeginInfo = {};
-    cmdBeginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    cmdBeginInfo.pNext = nullptr;
-    cmdBeginInfo.pInheritanceInfo = nullptr;
-    cmdBeginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VkCommandBufferBeginInfo cmdBeginInfo = command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
@@ -148,18 +150,23 @@ void VKlelu::draw()
     extent.height = WINDOW_HEIGHT;
     extent.width = WINDOW_WIDTH;
 
-    VkRenderPassBeginInfo rpInfo = {};
-    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpInfo.pNext = nullptr;
-    rpInfo.renderPass = renderPass;
-    rpInfo.renderArea.offset.x = 0;
-    rpInfo.renderArea.offset.y = 0;
-    rpInfo.renderArea.extent = extent;
-    rpInfo.framebuffer = framebuffers[swapchainImageIndex];
+    VkRenderPassBeginInfo rpInfo = renderpass_begin_info(renderPass, extent, framebuffers[swapchainImageIndex]);
     rpInfo.clearValueCount = 1;
     rpInfo.pClearValues = &clearValue;
 
     vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+    switch (currentShader) {
+        case 0:
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
+            break;
+        case 1:
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rgbTrianglePipeline);
+            break;
+        default:
+            break;
+    }
+    vkCmdDraw(cmd, 3, 1, 0, 0);
 
     vkCmdEndRenderPass(cmd);
 
@@ -167,22 +174,16 @@ void VKlelu::draw()
 
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-    VkSubmitInfo submit = {};
-    submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit.pNext = nullptr;
+    VkSubmitInfo submit = submit_info(&cmd);
     submit.pWaitDstStageMask = &waitStage;
     submit.waitSemaphoreCount = 1;
     submit.pWaitSemaphores = &imageAcquiredSemaphore;
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &renderSemaphore;
-    submit.commandBufferCount = 1;
-    submit.pCommandBuffers = &cmd;
 
     VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submit, renderFence));
 
-    VkPresentInfoKHR presentInfo = {};
-    presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    presentInfo.pNext = nullptr;
+    VkPresentInfoKHR presentInfo = present_info();
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &swapchain;
     presentInfo.waitSemaphoreCount = 1;
@@ -192,6 +193,41 @@ void VKlelu::draw()
     VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
 
     ++frameCount;
+}
+
+bool VKlelu::load_shader(const char *path, VkShaderModule &module)
+{
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        fprintf(stderr, "Failed to open file: %s\n", path);
+        return false;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long fileSize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    std::vector<uint32_t> spv_data(fileSize / sizeof(uint32_t));
+    size_t ret = fread(&spv_data[0], sizeof(spv_data[0]), spv_data.size(), f);
+    fclose(f);
+
+    if ((ret * sizeof(uint32_t)) != fileSize) {
+        fprintf(stderr, "Failed to read file: %s\n", path);
+        return false;
+    }
+
+    VkShaderModuleCreateInfo createInfo = {};
+    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    createInfo.pNext = nullptr;
+    createInfo.codeSize = spv_data.size() * sizeof(uint32_t);
+    createInfo.pCode = &spv_data[0];
+
+    if (vkCreateShaderModule(device, &createInfo, nullptr, &module) != VK_SUCCESS) {
+        fprintf(stderr, "Failed to create shader module: %s\n", path);
+        return false;
+    }
+
+    return true;
 }
 
 bool VKlelu::init_vulkan()
@@ -260,6 +296,9 @@ bool VKlelu::init_vulkan()
     if (!init_sync_structures())
         return false;
 
+    if (!init_pipelines())
+        return false;
+
     return true;
 }
 
@@ -271,7 +310,7 @@ bool VKlelu::init_swapchain()
                                     .set_desired_extent(WINDOW_WIDTH, WINDOW_HEIGHT)
                                     .build();
     if (!swap_ret) {
-        fprintf(stderr, "Failed to create Vulkan swapchain. Error: %s\n", swap_ret.error().message().c_str());
+        fprintf(stderr, "Failed to create swapchain. Error: %s\n", swap_ret.error().message().c_str());
         return false;
     }
     vkb::Swapchain vkb_swapchain = swap_ret.value();
@@ -280,30 +319,19 @@ bool VKlelu::init_swapchain()
     swapchainImages = vkb_swapchain.get_images().value();
     swapchainImageViews = vkb_swapchain.get_image_views().value();
 
-    fprintf(stderr, "Vulkan swapchain initialized successfully\n");
+    fprintf(stderr, "Swapchain initialized successfully\n");
     return true;
 }
 
 bool VKlelu::init_commands()
 {
-    VkCommandPoolCreateInfo commandPoolInfo = {};
-    commandPoolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    commandPoolInfo.pNext = nullptr;
-    commandPoolInfo.queueFamilyIndex = graphicsQueueFamily;
-    commandPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-
+    VkCommandPoolCreateInfo commandPoolInfo = command_pool_create_info(graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
     VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &commandPool));
 
-    VkCommandBufferAllocateInfo cmdAllocInfo = {};
-    cmdAllocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cmdAllocInfo.pNext = nullptr;
-    cmdAllocInfo.commandPool = commandPool;
-    cmdAllocInfo.commandBufferCount = 1;
-    cmdAllocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-
+    VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(commandPool, 1);
     VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &mainCommandBuffer));
 
-    fprintf(stderr, "Vulkan command pool initialized successfully\n");
+    fprintf(stderr, "Command pool initialized successfully\n");
     return true;
 }
 
@@ -337,20 +365,16 @@ bool VKlelu::init_default_renderpass()
 
     VK_CHECK(vkCreateRenderPass(device, &render_pass_info, nullptr, &renderPass));
 
-    fprintf(stderr, "Vulkan renderpass initialized successfully\n");
+    fprintf(stderr, "Renderpass initialized successfully\n");
     return true;
 }
 
 bool VKlelu::init_framebuffers()
 {
-    VkFramebufferCreateInfo fb_info = {};
-    fb_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    fb_info.pNext = nullptr;
-    fb_info.renderPass = renderPass;
-    fb_info.attachmentCount = 1;
-    fb_info.width = WINDOW_WIDTH;
-    fb_info.height = WINDOW_HEIGHT;
-    fb_info.layers = 1;
+    VkExtent2D extent;
+    extent.width = WINDOW_WIDTH;
+    extent.height = WINDOW_HEIGHT;
+    VkFramebufferCreateInfo fb_info = framebuffer_create_info(renderPass, extent);
 
     uint32_t swapchainImageCount = swapchainImages.size();
     framebuffers = std::vector<VkFramebuffer>(swapchainImageCount);
@@ -360,27 +384,104 @@ bool VKlelu::init_framebuffers()
         VK_CHECK(vkCreateFramebuffer(device, &fb_info, nullptr, &framebuffers[i]));
     }
 
-    fprintf(stderr, "Vulkan framebuffers initialized successfully\n");
+    fprintf(stderr, "Framebuffers initialized successfully\n");
     return true;
 }
 
 bool VKlelu::init_sync_structures()
 {
-    VkFenceCreateInfo fenceCreateInfo = {};
-    fenceCreateInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceCreateInfo.pNext = nullptr;
-    fenceCreateInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
+    VkFenceCreateInfo fenceCreateInfo = fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
     VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &renderFence));
 
-    VkSemaphoreCreateInfo semaphoreCreateInfo = {};
-    semaphoreCreateInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-    semaphoreCreateInfo.pNext = nullptr;
-    semaphoreCreateInfo.flags = 0;
-
+    VkSemaphoreCreateInfo semaphoreCreateInfo = semaphore_create_info();
     VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &imageAcquiredSemaphore));
     VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &renderSemaphore));
 
-    fprintf(stderr, "Vulkan sync structures initialized successfully\n");
+    fprintf(stderr, "Sync structures initialized successfully\n");
+    return true;
+}
+
+bool VKlelu::init_pipelines()
+{
+    VkShaderModule triangleFragShader;
+    const char *fragPath = "triangle.frag.spv";
+    if (!load_shader(fragPath, triangleFragShader)) {
+        fprintf(stderr, "Failed to build fragment shader module %s\n", fragPath);
+        return false;
+    } else {
+        fprintf(stderr, "Fragment shader module %s created successfully\n", fragPath);
+    }
+
+    VkShaderModule triangleVertShader;
+    const char *vertPath = "triangle.vert.spv";
+    if (!load_shader(vertPath, triangleVertShader)) {
+        fprintf(stderr, "Failed to build vertex shader module %s\n", vertPath);
+        return false;
+    } else {
+        fprintf(stderr, "Vertex shader module %s created successfully\n", vertPath);
+    }
+
+    VkPipelineLayoutCreateInfo pipelineLayoutInfo = pipeline_layout_create_info();
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout));
+
+    PipelineBuilder builder;
+    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, triangleVertShader));
+    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, triangleFragShader));
+    builder.vertexInputInfo = vertex_input_state_create_info();
+    builder.inputAssembly = input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    builder.viewport.x = 0.0f;
+    builder.viewport.y = 0.0f;
+    builder.viewport.width = WINDOW_WIDTH;
+    builder.viewport.height = WINDOW_HEIGHT;
+    builder.viewport.minDepth = 0.0f;
+    builder.viewport.maxDepth = 1.0f;
+    builder.scissor.offset = { 0, 0 };
+    builder.scissor.extent = { WINDOW_WIDTH, WINDOW_HEIGHT };
+    builder.rasterizer = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
+    builder.multisampling = multisampling_state_create_info();
+    builder.colorBlendAttachment = color_blend_attachment_state();
+    builder.pipelineLayout = trianglePipelineLayout;
+    trianglePipeline = builder.build_pipeline(device, renderPass);
+
+    vkDestroyShaderModule(device, triangleVertShader, nullptr);
+    vkDestroyShaderModule(device, triangleFragShader, nullptr);
+
+    if (!trianglePipeline) {
+        fprintf(stderr, "Failed to create graphics pipeline \"triangle\"\n");
+        return false;
+    }
+
+    VkShaderModule rgbTriangleFragShader;
+    const char *rgbFragPath = "rgb_triangle.frag.spv";
+    if (!load_shader(rgbFragPath, rgbTriangleFragShader)) {
+        fprintf(stderr, "Failed to build fragment shader module %s\n", rgbFragPath);
+        return false;
+    } else {
+        fprintf(stderr, "Fragment shader module %s created successfully\n", rgbFragPath);
+    }
+
+    VkShaderModule rgbTriangleVertShader;
+    const char *rgbVertPath = "rgb_triangle.vert.spv";
+    if (!load_shader(rgbVertPath, rgbTriangleVertShader)) {
+        fprintf(stderr, "Failed to build vertex shader module %s\n", rgbVertPath);
+        return false;
+    } else {
+        fprintf(stderr, "Vertex shader module %s created successfully\n", rgbVertPath);
+    }
+
+    builder.shaderStages.clear();
+    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, rgbTriangleVertShader));
+    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, rgbTriangleFragShader));
+    rgbTrianglePipeline = builder.build_pipeline(device, renderPass);
+
+    vkDestroyShaderModule(device, rgbTriangleVertShader, nullptr);
+    vkDestroyShaderModule(device, rgbTriangleFragShader, nullptr);
+
+    if (!rgbTrianglePipeline) {
+        fprintf(stderr, "Failed to create graphics pipeline\"rgb_triangle\"\n");
+        return false;
+    }
+
+    fprintf(stderr, "Graphics pipelines initialized successfully\n");
     return true;
 }
