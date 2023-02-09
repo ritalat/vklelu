@@ -6,6 +6,10 @@
 
 #include <vector>
 
+#define NS_IN_SEC 1000000000
+#define US_IN_SEC 1000000
+#define MS_IN_SEC 1000
+
 #define VK_CHECK(x)                                                                                \
     do                                                                                             \
     {                                                                                              \
@@ -63,8 +67,8 @@ VkPipelineLayoutCreateInfo pipeline_layout_create_info();
 
 struct PipelineBuilder
 {
+    void use_default_ff();
     VkPipeline build_pipeline(VkDevice device, VkRenderPass pass);
-
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
     VkPipelineVertexInputStateCreateInfo vertexInputInfo;
     VkPipelineInputAssemblyStateCreateInfo inputAssembly;

@@ -35,6 +35,7 @@ private:
     Mesh triangleMesh;
 
     SDL_Window *window;
+    VkExtent2D fbSize;
 
     VmaAllocator allocator;
 

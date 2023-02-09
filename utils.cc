@@ -229,6 +229,14 @@ VkPipelineLayoutCreateInfo pipeline_layout_create_info()
     return info;
 }
 
+void PipelineBuilder::use_default_ff()
+{
+    inputAssembly = input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    rasterizer = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
+    multisampling = multisampling_state_create_info();
+    colorBlendAttachment = color_blend_attachment_state();
+}
+
 VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass)
 {
     VkPipelineViewportStateCreateInfo viewportState = {};

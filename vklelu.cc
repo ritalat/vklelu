@@ -5,14 +5,13 @@
 #include "glm/glm.hpp"
 #include "SDL.h"
 #include "SDL_vulkan.h"
-#include "VkBootstrap.h"
-#define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
+#include "VkBootstrap.h"
 #include "vulkan/vulkan.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
-#include <cmath>
 #include <vector>
 
 #define WINDOW_WIDTH 1024
@@ -47,7 +46,14 @@ VKlelu::VKlelu(int argc, char *argv[]):
         return;
     }
 
+    int drawableWidth;
+    int drawableHeight;
+    SDL_Vulkan_GetDrawableSize(window, &drawableWidth, &drawableHeight);
+    fbSize.width = (uint32_t)drawableWidth;
+    fbSize.height = (uint32_t)drawableHeight;
+
     fprintf(stderr, "Window size: %ux%u\n", WINDOW_WIDTH, WINDOW_HEIGHT);
+    fprintf(stderr, "Drawable size: %ux%u\n", fbSize.width, fbSize.height);
 }
 
 VKlelu::~VKlelu()
@@ -127,11 +133,11 @@ int VKlelu::run()
 
 void VKlelu::draw()
 {
-    VK_CHECK(vkWaitForFences(device, 1, &renderFence, true, 1000000000));
+    VK_CHECK(vkWaitForFences(device, 1, &renderFence, true, NS_IN_SEC));
     VK_CHECK(vkResetFences(device, 1, &renderFence));
 
     uint32_t swapchainImageIndex;
-    VK_CHECK(vkAcquireNextImageKHR(device, swapchain, 1000000000, imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
+    VK_CHECK(vkAcquireNextImageKHR(device, swapchain, NS_IN_SEC, imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
 
     VK_CHECK(vkResetCommandBuffer(mainCommandBuffer, 0));
 
@@ -145,11 +151,7 @@ void VKlelu::draw()
     float flash = abs(sin(frameCount / 120.0f));
     clearValue.color = { { 0.0f, 0.0f, flash, 1.0f } };
 
-    VkExtent2D extent;
-    extent.height = WINDOW_HEIGHT;
-    extent.width = WINDOW_WIDTH;
-
-    VkRenderPassBeginInfo rpInfo = renderpass_begin_info(renderPass, extent, framebuffers[swapchainImageIndex]);
+    VkRenderPassBeginInfo rpInfo = renderpass_begin_info(renderPass, fbSize, framebuffers[swapchainImageIndex]);
     rpInfo.clearValueCount = 1;
     rpInfo.pClearValues = &clearValue;
 
@@ -335,7 +337,7 @@ bool VKlelu::init_swapchain()
     vkb::SwapchainBuilder swapchainBuilder{physicalDevice, device, surface};
     auto swap_ret = swapchainBuilder.use_default_format_selection()
                                     .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
-                                    .set_desired_extent(WINDOW_WIDTH, WINDOW_HEIGHT)
+                                    .set_desired_extent(fbSize.width, fbSize.height)
                                     .build();
     if (!swap_ret) {
         fprintf(stderr, "Failed to create swapchain. Error: %s\n", swap_ret.error().message().c_str());
@@ -399,10 +401,7 @@ bool VKlelu::init_default_renderpass()
 
 bool VKlelu::init_framebuffers()
 {
-    VkExtent2D extent;
-    extent.width = WINDOW_WIDTH;
-    extent.height = WINDOW_HEIGHT;
-    VkFramebufferCreateInfo fb_info = framebuffer_create_info(renderPass, extent);
+    VkFramebufferCreateInfo fb_info = framebuffer_create_info(renderPass, fbSize);
 
     uint32_t swapchainImageCount = swapchainImages.size();
     framebuffers = std::vector<VkFramebuffer>(swapchainImageCount);
@@ -432,22 +431,14 @@ bool VKlelu::init_sync_structures()
 bool VKlelu::init_pipelines()
 {
     VkShaderModule fragShader;
-    const char *fragPath = "shader.frag.spv";
-    if (!load_shader(fragPath, fragShader)) {
-        fprintf(stderr, "Failed to build fragment shader module %s\n", fragPath);
+    if (!load_shader("shader.frag.spv", fragShader))
         return false;
-    } else {
-        fprintf(stderr, "Fragment shader module %s created successfully\n", fragPath);
-    }
+    fprintf(stderr, "Fragment shader module shader.frag.spv created successfully\n");
 
     VkShaderModule vertShader;
-    const char *vertPath = "shader.vert.spv";
-    if (!load_shader(vertPath, vertShader)) {
-        fprintf(stderr, "Failed to build vertex shader module %s\n", vertPath);
+    if (!load_shader("shader.vert.spv", vertShader))
         return false;
-    } else {
-        fprintf(stderr, "Vertex shader module %s created successfully\n", vertPath);
-    }
+    fprintf(stderr, "Vertex shader module shader.vert.spv created successfully\n");
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = pipeline_layout_create_info();
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
@@ -455,6 +446,7 @@ bool VKlelu::init_pipelines()
     VertexInputDescription vertexDescription = Vertex::get_description();
 
     PipelineBuilder builder;
+    builder.use_default_ff();
     builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, vertShader));
     builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, fragShader));
     builder.vertexInputInfo = vertex_input_state_create_info();
@@ -462,18 +454,14 @@ bool VKlelu::init_pipelines()
     builder.vertexInputInfo.vertexAttributeDescriptionCount = vertexDescription.attributes.size();
     builder.vertexInputInfo.pVertexBindingDescriptions = vertexDescription.bindings.data();
     builder.vertexInputInfo.vertexBindingDescriptionCount = vertexDescription.bindings.size();
-    builder.inputAssembly = input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     builder.viewport.x = 0.0f;
     builder.viewport.y = 0.0f;
-    builder.viewport.width = WINDOW_WIDTH;
-    builder.viewport.height = WINDOW_HEIGHT;
+    builder.viewport.width = fbSize.width;
+    builder.viewport.height = fbSize.height;
     builder.viewport.minDepth = 0.0f;
     builder.viewport.maxDepth = 1.0f;
     builder.scissor.offset = { 0, 0 };
-    builder.scissor.extent = { WINDOW_WIDTH, WINDOW_HEIGHT };
-    builder.rasterizer = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
-    builder.multisampling = multisampling_state_create_info();
-    builder.colorBlendAttachment = color_blend_attachment_state();
+    builder.scissor.extent = fbSize;
     builder.pipelineLayout = meshPipelineLayout;
     meshPipeline = builder.build_pipeline(device, renderPass);
 
