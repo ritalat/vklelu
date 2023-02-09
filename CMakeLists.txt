@@ -59,7 +59,9 @@ add_dependencies(VKlelu Shaders)
 target_link_libraries(VKlelu Vulkan::Vulkan
                              SDL2::SDL2
                              SDL2::SDL2main
-                             vk-bootstrap::vk-bootstrap)
+                             glm::glm
+                             vk-bootstrap::vk-bootstrap
+                             VulkanMemoryAllocator)
 
 install(TARGETS VKlelu SDL2 RUNTIME DESTINATION ".")
 foreach(SPIRV_BINARY ${SPIRV_BINARIES})
