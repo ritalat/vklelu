@@ -6,8 +6,12 @@ layout (location = 2) in vec3 inColor;
 
 layout (location = 0) out vec3 outColor;
 
+layout (push_constant) uniform PushConstants {
+    mat4 render_matrix;
+} pcs;
+
 void main()
 {
-    gl_Position = vec4(inPosition, 1.0f);
+    gl_Position = pcs.render_matrix * vec4(inPosition, 1.0f);
     outColor = inColor;
 }

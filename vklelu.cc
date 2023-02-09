@@ -3,6 +3,7 @@
 #include "utils.hh"
 
 #include "glm/glm.hpp"
+#include "glm/gtx/transform.hpp"
 #include "SDL.h"
 #include "SDL_vulkan.h"
 #include "vk_mem_alloc.h"
@@ -158,8 +159,17 @@ void VKlelu::draw()
     vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
+
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &triangleMesh.vertexBuffer.buffer, &offset);
+
+    glm::vec3 camera = { 0.0f, 0.0f, -2.0f };
+    glm::mat4 view = glm::translate(glm::mat4(1.0f), camera);
+    glm::mat4 model = glm::rotate(glm::mat4(1.0f), glm::radians(frameCount * 0.4f), glm::vec3(0, 1, 0));
+    glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)fbSize.width/(float)fbSize.height, 0.1f, 200.0f);
+    glm::mat4 render_matrix = projection * view * model;
+    vkCmdPushConstants(cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &render_matrix);
+
     vkCmdDraw(cmd, triangleMesh.vertices.size(), 1, 0, 0);
 
     vkCmdEndRenderPass(cmd);
@@ -440,7 +450,14 @@ bool VKlelu::init_pipelines()
         return false;
     fprintf(stderr, "Vertex shader module shader.vert.spv created successfully\n");
 
+    VkPushConstantRange pushConstant;
+    pushConstant.offset = 0;
+    pushConstant.size = sizeof(glm::mat4);
+    pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = pipeline_layout_create_info();
+    pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
 
     VertexInputDescription vertexDescription = Vertex::get_description();
