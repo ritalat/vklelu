@@ -1,7 +1,9 @@
 #pragma once
 
-#include "SDL.h"
+#include "utils.hh"
 
+#include "SDL.h"
+#include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"
 
 #include <vector>
@@ -16,6 +18,8 @@ public:
 private:
     void draw();
 
+    void load_meshes();
+    void upload_mesh(Mesh &mesh);
     bool load_shader(const char *path, VkShaderModule &module);
 
     bool init_vulkan();
@@ -27,9 +31,12 @@ private:
     bool init_pipelines();
 
     int frameCount;
-    int currentShader;
+
+    Mesh triangleMesh;
 
     SDL_Window *window;
+
+    VmaAllocator allocator;
 
     VkInstance instance;
     VkDebugUtilsMessengerEXT debugMessenger;
@@ -48,14 +55,12 @@ private:
     VkCommandBuffer mainCommandBuffer;
 
     VkRenderPass renderPass;
-
     std::vector<VkFramebuffer> framebuffers;
 
     VkSemaphore imageAcquiredSemaphore;
     VkSemaphore renderSemaphore;
     VkFence renderFence;
 
-    VkPipeline trianglePipeline;
-    VkPipeline rgbTrianglePipeline;
-    VkPipelineLayout trianglePipelineLayout;
+    VkPipeline meshPipeline;
+    VkPipelineLayout meshPipelineLayout;
 };

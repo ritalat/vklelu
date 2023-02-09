@@ -2,9 +2,12 @@
 
 #include "utils.hh"
 
+#include "glm/glm.hpp"
 #include "SDL.h"
 #include "SDL_vulkan.h"
 #include "VkBootstrap.h"
+#define VMA_IMPLEMENTATION
+#include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"
 
 #include <cstdio>
@@ -19,11 +22,11 @@
 
 VKlelu::VKlelu(int argc, char *argv[]):
     frameCount(0),
-    currentShader(0),
     window(nullptr),
     instance(nullptr),
     surface(nullptr),
     device(nullptr),
+    allocator(nullptr),
     swapchain(nullptr)
 {
     (void)argc;
@@ -51,9 +54,10 @@ VKlelu::~VKlelu()
 {
     vkDeviceWaitIdle(device);
 
-    vkDestroyPipelineLayout(device, trianglePipelineLayout, nullptr);
-    vkDestroyPipeline(device, rgbTrianglePipeline, nullptr);
-    vkDestroyPipeline(device, trianglePipeline, nullptr);
+    vmaDestroyBuffer(allocator, triangleMesh.vertexBuffer.buffer, triangleMesh.vertexBuffer.allocation);
+
+    vkDestroyPipelineLayout(device, meshPipelineLayout, nullptr);
+    vkDestroyPipeline(device, meshPipeline, nullptr);
 
     vkDestroySemaphore(device, imageAcquiredSemaphore, nullptr);
     vkDestroySemaphore(device, renderSemaphore, nullptr);
@@ -69,6 +73,10 @@ VKlelu::~VKlelu()
             vkDestroyFramebuffer(device, framebuffers[i], nullptr);
             vkDestroyImageView(device, swapchainImageViews[i], nullptr);
         }
+    }
+
+    if (allocator) {
+        vmaDestroyAllocator(allocator);
     }
 
     if (device)
@@ -95,6 +103,8 @@ int VKlelu::run()
     if (!init_vulkan())
         return EXIT_FAILURE;
 
+    load_meshes();
+
     bool quit = false;
     SDL_Event event;
 
@@ -103,17 +113,6 @@ int VKlelu::run()
             switch (event.type) {
                 case SDL_QUIT:
                     quit = true;
-                    break;
-                case SDL_KEYDOWN:
-                    switch (event.key.keysym.sym) {
-                        case SDLK_SPACE:
-                            ++currentShader;
-                            if (currentShader > 1)
-                                currentShader = 0;
-                            break;
-                        default:
-                            break;
-                    }
                     break;
                 default:
                     break;
@@ -156,17 +155,10 @@ void VKlelu::draw()
 
     vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    switch (currentShader) {
-        case 0:
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, trianglePipeline);
-            break;
-        case 1:
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, rgbTrianglePipeline);
-            break;
-        default:
-            break;
-    }
-    vkCmdDraw(cmd, 3, 1, 0, 0);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &triangleMesh.vertexBuffer.buffer, &offset);
+    vkCmdDraw(cmd, triangleMesh.vertices.size(), 1, 0, 0);
 
     vkCmdEndRenderPass(cmd);
 
@@ -193,6 +185,36 @@ void VKlelu::draw()
     VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
 
     ++frameCount;
+}
+
+void VKlelu::load_meshes()
+{
+    triangleMesh.vertices.resize(3);
+    triangleMesh.vertices[0].position = { 1.0f, 1.0f, 0.0f };
+    triangleMesh.vertices[1].position = { -1.0f, 1.0f, 0.0f };
+    triangleMesh.vertices[2].position = { 0.0f, -1.0f, 0.0f };
+    triangleMesh.vertices[0].color = { 1.0f, 0.0f, 0.0f };
+    triangleMesh.vertices[1].color = { 0.0f, 1.0f, 0.0f };
+    triangleMesh.vertices[2].color = { 0.0f, 0.0f, 1.0f };
+    upload_mesh(triangleMesh);
+}
+
+void VKlelu::upload_mesh(Mesh &mesh)
+{
+    VkBufferCreateInfo bufferInfo = {};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = mesh.vertices.size() * sizeof(Vertex);
+    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+    VmaAllocationCreateInfo vmaAllocInfo = {};
+    vmaAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+    VK_CHECK(vmaCreateBuffer(allocator, &bufferInfo, &vmaAllocInfo, &mesh.vertexBuffer.buffer, &mesh.vertexBuffer.allocation, nullptr));
+
+    void *data;
+    vmaMapMemory(allocator, mesh.vertexBuffer.allocation, &data);
+    memcpy(data, mesh.vertices.data(), mesh.vertices.size() * sizeof(Vertex));
+    vmaUnmapMemory(allocator, mesh.vertexBuffer.allocation);
 }
 
 bool VKlelu::load_shader(const char *path, VkShaderModule &module)
@@ -278,6 +300,12 @@ bool VKlelu::init_vulkan()
     }
     graphicsQueue = graphics_queue_ret.value();
     graphicsQueueFamily = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
+
+    VmaAllocatorCreateInfo allocatorInfo = {};
+    allocatorInfo.instance = instance;
+    allocatorInfo.physicalDevice = physicalDevice;
+    allocatorInfo.device = device;
+    VK_CHECK(vmaCreateAllocator(&allocatorInfo, &allocator));
 
     fprintf(stderr, "Vulkan 1.%d initialized successfully\n", REQUIRED_VK_VERSION_MINOR);
 
@@ -403,18 +431,18 @@ bool VKlelu::init_sync_structures()
 
 bool VKlelu::init_pipelines()
 {
-    VkShaderModule triangleFragShader;
-    const char *fragPath = "triangle.frag.spv";
-    if (!load_shader(fragPath, triangleFragShader)) {
+    VkShaderModule fragShader;
+    const char *fragPath = "shader.frag.spv";
+    if (!load_shader(fragPath, fragShader)) {
         fprintf(stderr, "Failed to build fragment shader module %s\n", fragPath);
         return false;
     } else {
         fprintf(stderr, "Fragment shader module %s created successfully\n", fragPath);
     }
 
-    VkShaderModule triangleVertShader;
-    const char *vertPath = "triangle.vert.spv";
-    if (!load_shader(vertPath, triangleVertShader)) {
+    VkShaderModule vertShader;
+    const char *vertPath = "shader.vert.spv";
+    if (!load_shader(vertPath, vertShader)) {
         fprintf(stderr, "Failed to build vertex shader module %s\n", vertPath);
         return false;
     } else {
@@ -422,12 +450,18 @@ bool VKlelu::init_pipelines()
     }
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = pipeline_layout_create_info();
-    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &trianglePipelineLayout));
+    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
+
+    VertexInputDescription vertexDescription = Vertex::get_description();
 
     PipelineBuilder builder;
-    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, triangleVertShader));
-    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, triangleFragShader));
+    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, vertShader));
+    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, fragShader));
     builder.vertexInputInfo = vertex_input_state_create_info();
+    builder.vertexInputInfo.pVertexAttributeDescriptions = vertexDescription.attributes.data();
+    builder.vertexInputInfo.vertexAttributeDescriptionCount = vertexDescription.attributes.size();
+    builder.vertexInputInfo.pVertexBindingDescriptions = vertexDescription.bindings.data();
+    builder.vertexInputInfo.vertexBindingDescriptionCount = vertexDescription.bindings.size();
     builder.inputAssembly = input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     builder.viewport.x = 0.0f;
     builder.viewport.y = 0.0f;
@@ -440,45 +474,14 @@ bool VKlelu::init_pipelines()
     builder.rasterizer = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
     builder.multisampling = multisampling_state_create_info();
     builder.colorBlendAttachment = color_blend_attachment_state();
-    builder.pipelineLayout = trianglePipelineLayout;
-    trianglePipeline = builder.build_pipeline(device, renderPass);
+    builder.pipelineLayout = meshPipelineLayout;
+    meshPipeline = builder.build_pipeline(device, renderPass);
 
-    vkDestroyShaderModule(device, triangleVertShader, nullptr);
-    vkDestroyShaderModule(device, triangleFragShader, nullptr);
+    vkDestroyShaderModule(device, vertShader, nullptr);
+    vkDestroyShaderModule(device, fragShader, nullptr);
 
-    if (!trianglePipeline) {
-        fprintf(stderr, "Failed to create graphics pipeline \"triangle\"\n");
-        return false;
-    }
-
-    VkShaderModule rgbTriangleFragShader;
-    const char *rgbFragPath = "rgb_triangle.frag.spv";
-    if (!load_shader(rgbFragPath, rgbTriangleFragShader)) {
-        fprintf(stderr, "Failed to build fragment shader module %s\n", rgbFragPath);
-        return false;
-    } else {
-        fprintf(stderr, "Fragment shader module %s created successfully\n", rgbFragPath);
-    }
-
-    VkShaderModule rgbTriangleVertShader;
-    const char *rgbVertPath = "rgb_triangle.vert.spv";
-    if (!load_shader(rgbVertPath, rgbTriangleVertShader)) {
-        fprintf(stderr, "Failed to build vertex shader module %s\n", rgbVertPath);
-        return false;
-    } else {
-        fprintf(stderr, "Vertex shader module %s created successfully\n", rgbVertPath);
-    }
-
-    builder.shaderStages.clear();
-    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_VERTEX_BIT, rgbTriangleVertShader));
-    builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, rgbTriangleFragShader));
-    rgbTrianglePipeline = builder.build_pipeline(device, renderPass);
-
-    vkDestroyShaderModule(device, rgbTriangleVertShader, nullptr);
-    vkDestroyShaderModule(device, rgbTriangleFragShader, nullptr);
-
-    if (!rgbTrianglePipeline) {
-        fprintf(stderr, "Failed to create graphics pipeline\"rgb_triangle\"\n");
+    if (!meshPipeline) {
+        fprintf(stderr, "Failed to create graphics pipeline \"mesh\"\n");
         return false;
     }
 

@@ -21,10 +21,8 @@ add_subdirectory(external)
 
 find_package(Vulkan REQUIRED COMPONENTS glslc)
 
-set(SHADERS rgb_triangle.frag
-            rgb_triangle.vert
-            triangle.frag
-            triangle.vert)
+set(SHADERS shader.frag
+            shader.vert)
 
 foreach(SHADER ${SHADERS})
     set(GLSLC_OUT "${SHADER}.spv")

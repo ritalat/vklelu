@@ -1,5 +1,7 @@
 #pragma once
 
+#include "glm/glm.hpp"
+#include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"
 
 #include <vector>
@@ -14,6 +16,33 @@
             abort();                                                                               \
         }                                                                                          \
     } while (0)
+
+struct BufferAllocation
+{
+    VkBuffer buffer;
+    VmaAllocation allocation;
+};
+
+struct VertexInputDescription
+{
+    std::vector<VkVertexInputBindingDescription> bindings;
+    std::vector<VkVertexInputAttributeDescription> attributes;
+    VkPipelineVertexInputStateCreateFlags flags = 0;
+};
+
+struct Vertex
+{
+    static VertexInputDescription get_description();
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec3 color;
+};
+
+struct Mesh
+{
+    std::vector<Vertex> vertices;
+    BufferAllocation vertexBuffer;
+};
 
 VkCommandPoolCreateInfo command_pool_create_info(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags flags = 0);
 VkCommandBufferAllocateInfo command_buffer_allocate_info(VkCommandPool pool, uint32_t count = 1, VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
