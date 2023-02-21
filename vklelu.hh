@@ -6,6 +6,8 @@
 #include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"
 
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 class VKlelu
@@ -17,12 +19,17 @@ public:
 
 private:
     void draw();
+    void draw_objects(VkCommandBuffer cmd, Himmeli *first, int count);
 
     bool wd_is_builddir();
 
+    void init_scene();
     void load_meshes();
     void upload_mesh(Mesh &mesh);
     bool load_shader(const char *path, VkShaderModule &module);
+    Material *create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name);
+    Mesh *get_mesh(const std::string &name);
+    Material *get_material(const std::string &name);
 
     bool init_vulkan();
     bool init_swapchain();
@@ -34,8 +41,9 @@ private:
 
     int frameCount;
 
-    Mesh triangleMesh;
-    Mesh kapinaMesh;
+    std::vector<Himmeli> himmelit;
+    std::unordered_map<std::string, Mesh> meshes;
+    std::unordered_map<std::string, Material> materials;
 
     SDL_Window *window;
     VkExtent2D fbSize;
@@ -68,7 +76,4 @@ private:
     VkSemaphore imageAcquiredSemaphore;
     VkSemaphore renderSemaphore;
     VkFence renderFence;
-
-    VkPipeline meshPipeline;
-    VkPipelineLayout meshPipelineLayout;
 };

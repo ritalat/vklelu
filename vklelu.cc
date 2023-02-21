@@ -14,6 +14,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #define WINDOW_WIDTH 1024
@@ -62,11 +63,13 @@ VKlelu::~VKlelu()
 {
     vkDeviceWaitIdle(device);
 
-    vmaDestroyBuffer(allocator, triangleMesh.vertexBuffer.buffer, triangleMesh.vertexBuffer.allocation);
-    vmaDestroyBuffer(allocator, kapinaMesh.vertexBuffer.buffer, kapinaMesh.vertexBuffer.allocation);
+    for (auto mesh : meshes)
+        vmaDestroyBuffer(allocator, mesh.second.vertexBuffer.buffer, mesh.second.vertexBuffer.allocation);
 
-    vkDestroyPipelineLayout(device, meshPipelineLayout, nullptr);
-    vkDestroyPipeline(device, meshPipeline, nullptr);
+    for (auto material : materials) {
+        vkDestroyPipelineLayout(device, material.second.pipelineLayout, nullptr);
+        vkDestroyPipeline(device, material.second.pipeline, nullptr);
+    }
 
     vkDestroySemaphore(device, imageAcquiredSemaphore, nullptr);
     vkDestroySemaphore(device, renderSemaphore, nullptr);
@@ -87,9 +90,8 @@ VKlelu::~VKlelu()
         }
     }
 
-    if (allocator) {
+    if (allocator)
         vmaDestroyAllocator(allocator);
-    }
 
     if (device)
         vkDestroyDevice(device, nullptr);
@@ -115,7 +117,7 @@ int VKlelu::run()
     if (!init_vulkan())
         return EXIT_FAILURE;
 
-    load_meshes();
+    init_scene();
 
     bool quit = false;
     SDL_Event event;
@@ -168,20 +170,7 @@ void VKlelu::draw()
 
     vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
-
-    VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &kapinaMesh.vertexBuffer.buffer, &offset);
-
-    glm::vec3 camera = { 0.0f, 0.0f, -2.0f };
-    glm::mat4 view = glm::translate(glm::mat4(1.0f), camera);
-    glm::mat4 model = glm::rotate(glm::mat4(1.0f), glm::radians(frameCount * 0.4f), glm::vec3(0, 1, 0));
-    glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)fbSize.width/(float)fbSize.height, 0.1f, 200.0f);
-    projection[1][1] *= -1;
-    glm::mat4 render_matrix = projection * view * model;
-    vkCmdPushConstants(cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &render_matrix);
-
-    vkCmdDraw(cmd, kapinaMesh.vertices.size(), 1, 0, 0);
+    draw_objects(cmd, himmelit.data(), himmelit.size());
 
     vkCmdEndRenderPass(cmd);
 
@@ -210,6 +199,36 @@ void VKlelu::draw()
     ++frameCount;
 }
 
+void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
+{
+    glm::vec3 camera = { 0.0f, 0.0f, -2.0f };
+    glm::mat4 view = glm::translate(glm::mat4(1.0f), camera);
+    glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)fbSize.width/(float)fbSize.height, 0.1f, 200.0f);
+    projection[1][1] *= -1;
+
+    Mesh *lastMesh = nullptr;
+    Material *lastMaterial = nullptr;
+
+    for (int i = 0; i < count; ++i) {
+        Himmeli &himmeli = first[i];
+        if (himmeli.material != lastMaterial) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipeline);
+            lastMaterial = himmeli.material;
+        }
+        glm::mat4 model = himmeli.transformations;
+        glm::mat4 render_matrix = projection * view * model;
+
+        vkCmdPushConstants(cmd, himmeli.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &render_matrix);
+
+        if (himmeli.mesh != lastMesh) {
+            VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &himmeli.mesh->vertexBuffer.buffer, &offset);
+            lastMesh = himmeli.mesh;
+        }
+        vkCmdDraw(cmd, himmeli.mesh->vertices.size(), 1, 0, 0);
+    }
+}
+
 bool VKlelu::wd_is_builddir()
 {
     FILE *f = fopen("CMakeCache.txt", "r");
@@ -222,8 +241,28 @@ bool VKlelu::wd_is_builddir()
     }
 }
 
+void VKlelu::init_scene()
+{
+    load_meshes();
+
+    Himmeli kapina;
+    kapina.mesh = get_mesh("kapina");
+    kapina.material = get_material("defaultMesh");
+    kapina.transformations = glm::mat4{ 1.0f };
+    himmelit.push_back(kapina);
+
+    Himmeli triangle;
+    triangle.mesh = get_mesh("triangle");
+    triangle.material = get_material("defaultMesh");
+    glm::mat4 translation = glm::translate(glm::mat4{ 1.0f }, glm::vec3(-5.0f, 0.0f, -5.0f));
+    glm::mat4 scale = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f, 0.2f, 0.2f });
+    triangle.transformations = translation * scale;
+    himmelit.push_back(triangle);
+}
+
 void VKlelu::load_meshes()
 {
+    Mesh triangleMesh;
     triangleMesh.vertices.resize(3);
     triangleMesh.vertices[0].position = { 1.0f, 1.0f, 0.0f };
     triangleMesh.vertices[1].position = { -1.0f, 1.0f, 0.0f };
@@ -232,6 +271,7 @@ void VKlelu::load_meshes()
     triangleMesh.vertices[1].color = { 0.0f, 1.0f, 0.0f };
     triangleMesh.vertices[2].color = { 0.0f, 0.0f, 1.0f };
     upload_mesh(triangleMesh);
+    meshes["triangle"] = triangleMesh;
 
     const char *baseDir = wd_is_builddir() ? "../" : nullptr;
     if(baseDir) {
@@ -240,8 +280,10 @@ void VKlelu::load_meshes()
         fprintf(stderr, "Asset base directory: .\n");
     }
 
+    Mesh kapinaMesh;
     kapinaMesh.load_obj_file("kultainenapina.obj", baseDir);
     upload_mesh(kapinaMesh);
+    meshes["kapina"] = kapinaMesh;
 }
 
 void VKlelu::upload_mesh(Mesh &mesh)
@@ -295,6 +337,31 @@ bool VKlelu::load_shader(const char *path, VkShaderModule &module)
     }
 
     return true;
+}
+
+Material *VKlelu::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name)
+{
+    Material mat;
+    mat.pipeline = pipeline;
+    mat.pipelineLayout = layout;
+    materials[name] = mat;
+    return &materials[name];
+}
+
+Mesh *VKlelu::get_mesh(const std::string &name)
+{
+    auto it = meshes.find(name);
+    if (it == meshes.end())
+        return nullptr;
+    return &(*it).second;
+}
+
+Material *VKlelu::get_material(const std::string &name)
+{
+    auto it = materials.find(name);
+    if (it == materials.end())
+        return nullptr;
+    return &(*it).second;
 }
 
 bool VKlelu::init_vulkan()
@@ -538,6 +605,9 @@ bool VKlelu::init_pipelines()
         return false;
     fprintf(stderr, "Vertex shader module shader.vert.spv created successfully\n");
 
+    VkPipeline meshPipeline;
+    VkPipelineLayout meshPipelineLayout;
+
     VkPushConstantRange pushConstant;
     pushConstant.offset = 0;
     pushConstant.size = sizeof(glm::mat4);
@@ -577,6 +647,8 @@ bool VKlelu::init_pipelines()
         fprintf(stderr, "Failed to create graphics pipeline \"mesh\"\n");
         return false;
     }
+
+    create_material(meshPipeline, meshPipelineLayout, "defaultMesh");
 
     fprintf(stderr, "Graphics pipelines initialized successfully\n");
     return true;
