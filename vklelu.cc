@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -22,6 +23,8 @@
 #define WINDOW_HEIGHT 768
 
 #define REQUIRED_VK_VERSION_MINOR 3
+
+#define MAX_OBJECTS 10000
 
 VKlelu::VKlelu(int argc, char *argv[]):
     frameCount(0),
@@ -72,7 +75,15 @@ VKlelu::~VKlelu()
         vkDestroyPipeline(device, material.second.pipeline, nullptr);
     }
 
+    vkDestroyDescriptorSetLayout(device, objectSetLayout, nullptr);
+    vkDestroyDescriptorSetLayout(device, globalSetLayout, nullptr);
+    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+
+    vmaDestroyBuffer(allocator, sceneParameterBuffer.buffer, sceneParameterBuffer.allocation);
+
     for (FrameData frame : frameData) {
+        vmaDestroyBuffer(allocator, frame.objectBuffer.buffer, frame.objectBuffer.allocation);
+        vmaDestroyBuffer(allocator, frame.cameraBuffer.buffer, frame.cameraBuffer.allocation);
         vkDestroySemaphore(device, frame.imageAcquiredSemaphore, nullptr);
         vkDestroySemaphore(device, frame.renderSemaphore, nullptr);
         vkDestroyFence(device, frame.renderFence, nullptr);
@@ -205,10 +216,41 @@ void VKlelu::draw()
 
 void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
 {
+    FrameData currentFrame = get_current_frame();
+
     glm::vec3 camera = { 0.0f, 0.0f, -2.0f };
     glm::mat4 view = glm::translate(glm::mat4(1.0f), camera);
     glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)fbSize.width/(float)fbSize.height, 0.1f, 200.0f);
     projection[1][1] *= -1;
+
+    CameraData cam;
+    cam.proj = projection;
+    cam.view = view;
+    cam.viewproj = projection * view;
+
+    void *camData;
+    vmaMapMemory(allocator, currentFrame.cameraBuffer.allocation, &camData);
+    memcpy(camData, &cam, sizeof(cam));
+    vmaUnmapMemory(allocator, currentFrame.cameraBuffer.allocation);
+
+    float framed = (frameCount / 120.0f);
+    sceneParameters.ambientColor = { sin(framed), 0.0f, cos(framed), 1.0f };
+
+    char *sceneData;
+    vmaMapMemory(allocator, sceneParameterBuffer.allocation, (void**)&sceneData);
+    int frameIndex = frameCount % MAX_FRAMES_IN_FLIGHT;
+    sceneData += pad_uniform_buffer_size(sizeof(SceneData)) * frameIndex;
+    memcpy(sceneData, &sceneParameters, sizeof(SceneData));
+    vmaUnmapMemory(allocator, sceneParameterBuffer.allocation);
+
+    void *objData;
+    vmaMapMemory(allocator, currentFrame.objectBuffer.allocation, &objData);
+    ObjectData * objectSSBO = (ObjectData *)objData;
+    for (int i = 0; i < count; ++i) {
+        Himmeli &himmeli = first[i];
+        objectSSBO[i].model = himmeli.transformations;
+    }
+    vmaUnmapMemory(allocator, currentFrame.objectBuffer.allocation);
 
     Mesh *lastMesh = nullptr;
     Material *lastMaterial = nullptr;
@@ -218,11 +260,13 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
         if (himmeli.material != lastMaterial) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipeline);
             lastMaterial = himmeli.material;
+            uint32_t uniformOffset = pad_uniform_buffer_size(sizeof(SceneData)) * frameIndex;
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipelineLayout, 0, 1, &currentFrame.globalDescriptor, 1, &uniformOffset);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipelineLayout, 1, 1, &currentFrame.objectDescriptor, 0, nullptr);
         }
-        glm::mat4 model = himmeli.transformations;
-        glm::mat4 render_matrix = projection * view * model;
 
-        vkCmdPushConstants(cmd, himmeli.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &render_matrix);
+        glm::mat4 model = himmeli.transformations;
+        vkCmdPushConstants(cmd, himmeli.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
 
         if (himmeli.mesh != lastMesh) {
             VkDeviceSize offset = 0;
@@ -373,6 +417,31 @@ Material *VKlelu::get_material(const std::string &name)
     return &(*it).second;
 }
 
+BufferAllocation VKlelu::create_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
+{
+    VkBufferCreateInfo bufferInfo = {};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.pNext = nullptr;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage;
+
+    VmaAllocationCreateInfo allocInfo = {};
+    allocInfo.usage = memoryUsage;
+
+    BufferAllocation buffer;
+    VK_CHECK(vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, nullptr));
+    return buffer;
+}
+
+size_t VKlelu::pad_uniform_buffer_size(size_t originalSize)
+{
+    size_t minUboAllignment = physicalDeviceProperties.limits.minUniformBufferOffsetAlignment;
+    size_t alignedSize = originalSize;
+    if (minUboAllignment > 0)
+        alignedSize = (alignedSize + minUboAllignment - 1) & ~(minUboAllignment -1);
+    return alignedSize;
+}
+
 bool VKlelu::init_vulkan()
 {
     vkb::InstanceBuilder builder;
@@ -404,9 +473,16 @@ bool VKlelu::init_vulkan()
     }
     vkb::PhysicalDevice vkb_phys = phys_ret.value();
     physicalDevice = vkb_phys.physical_device;
+    physicalDeviceProperties = vkb_phys.properties;
+
+    VkPhysicalDeviceShaderDrawParametersFeatures shaderParamFeatures = {};
+    shaderParamFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
+    shaderParamFeatures.pNext = nullptr;
+    shaderParamFeatures.shaderDrawParameters = VK_TRUE;
 
     vkb::DeviceBuilder deviceBuilder{ vkb_phys };
-    auto dev_ret = deviceBuilder.build();
+    auto dev_ret = deviceBuilder.add_pNext(&shaderParamFeatures)
+                                .build();
     if (!dev_ret) {
         fprintf(stderr, "Failed to create Vulkan device. Error: %s\n", dev_ret.error().message().c_str());
         return false;
@@ -443,6 +519,9 @@ bool VKlelu::init_vulkan()
         return false;
 
     if (!init_sync_structures())
+        return false;
+
+    if (!init_descriptors())
         return false;
 
     if (!init_pipelines())
@@ -606,6 +685,95 @@ bool VKlelu::init_sync_structures()
     return true;
 }
 
+bool VKlelu::init_descriptors()
+{
+    size_t sceneParamBufferSize = MAX_FRAMES_IN_FLIGHT * pad_uniform_buffer_size(sizeof(SceneData));
+    sceneParameterBuffer = create_buffer(sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    VkDescriptorSetLayoutBinding camBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
+    VkDescriptorSetLayoutBinding sceneBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 1);
+    VkDescriptorSetLayoutBinding bindings[2] = { camBind, sceneBind };
+
+    VkDescriptorSetLayoutCreateInfo setInfo = {};
+    setInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    setInfo.pNext = nullptr;
+    setInfo.flags = 0;
+    setInfo.bindingCount = 2;
+    setInfo.pBindings = bindings;
+
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &globalSetLayout));
+
+    VkDescriptorSetLayoutBinding objectBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
+
+    VkDescriptorSetLayoutCreateInfo set2Info = {};
+    set2Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    set2Info.pNext = nullptr;
+    set2Info.flags = 0;
+    set2Info.bindingCount = 1;
+    set2Info.pBindings = &objectBind;
+
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &set2Info, nullptr, &objectSetLayout));
+
+    std::vector<VkDescriptorPoolSize> sizes = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 },
+                                                { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 10 },
+                                                { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 } };
+
+    VkDescriptorPoolCreateInfo poolInfo = {};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.pNext = nullptr;
+    poolInfo.flags = 0;
+    poolInfo.maxSets = 10;
+    poolInfo.poolSizeCount = sizes.size();
+    poolInfo.pPoolSizes = sizes.data();
+
+    VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool));
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        frameData[i].cameraBuffer = create_buffer(sizeof(CameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        frameData[i].objectBuffer = create_buffer(sizeof(ObjectData) * MAX_OBJECTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+        VkDescriptorSetAllocateInfo allocInfo = {};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        allocInfo.pNext = nullptr;
+        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = &globalSetLayout;
+        VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &frameData[i].globalDescriptor));
+
+        VkDescriptorSetAllocateInfo objAllocInfo = {};
+        objAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+        objAllocInfo.pNext = nullptr;
+        objAllocInfo.descriptorPool = descriptorPool;
+        objAllocInfo.descriptorSetCount = 1;
+        objAllocInfo.pSetLayouts = &objectSetLayout;
+        VK_CHECK(vkAllocateDescriptorSets(device, &objAllocInfo, &frameData[i].objectDescriptor));
+
+        VkDescriptorBufferInfo camInfo = {};
+        camInfo.buffer = frameData[i].cameraBuffer.buffer;
+        camInfo.offset = 0;
+        camInfo.range = sizeof(CameraData);
+
+        VkDescriptorBufferInfo sceneInfo = {};
+        sceneInfo.buffer = sceneParameterBuffer.buffer;
+        sceneInfo.offset = 0;
+        sceneInfo.range = sizeof(SceneData);
+
+        VkDescriptorBufferInfo objInfo = {};
+        objInfo.buffer = frameData[i].objectBuffer.buffer;
+        objInfo.offset = 0;
+        objInfo.range = sizeof(ObjectData) * MAX_OBJECTS;
+
+        VkWriteDescriptorSet camWrite = write_descriptor_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, frameData[i].globalDescriptor, &camInfo, 0);
+        VkWriteDescriptorSet sceneWrite = write_descriptor_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, frameData[i].globalDescriptor, &sceneInfo, 1);
+        VkWriteDescriptorSet objWrite = write_descriptor_buffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, frameData[i].objectDescriptor, &objInfo, 0);
+        VkWriteDescriptorSet writeSet[3] = { camWrite, sceneWrite, objWrite };
+        vkUpdateDescriptorSets(device, 3, writeSet, 0 , nullptr);
+    }
+
+    fprintf(stderr, "Descriptors initialized successfully\n");
+    return true;
+}
+
 bool VKlelu::init_pipelines()
 {
     VkShaderModule fragShader;
@@ -626,9 +794,13 @@ bool VKlelu::init_pipelines()
     pushConstant.size = sizeof(glm::mat4);
     pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
+    VkDescriptorSetLayout setLayouts[2] = { globalSetLayout, objectSetLayout };
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = pipeline_layout_create_info();
     pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.setLayoutCount = 2;
+    pipelineLayoutInfo.pSetLayouts = setLayouts;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
 
     VertexInputDescription vertexDescription = Vertex::get_description();

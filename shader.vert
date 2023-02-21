@@ -1,4 +1,4 @@
-#version 450
+#version 460
 
 layout (location = 0) in vec3 inPosition;
 layout (location = 1) in vec3 inNormal;
@@ -6,12 +6,27 @@ layout (location = 2) in vec3 inColor;
 
 layout (location = 0) out vec3 outColor;
 
+layout (set = 0, binding = 0) uniform CameraData {
+    mat4 view;
+    mat4 proj;
+    mat4 viewproj;
+} cam;
+
+struct ObjectData {
+    mat4 model;
+};
+
+layout (std140, set = 1, binding = 0) readonly buffer ObjectBuffer {
+    ObjectData objects[];
+} obj;
+
 layout (push_constant) uniform PushConstants {
-    mat4 render_matrix;
+    mat4 model;
 } pcs;
 
 void main()
 {
-    gl_Position = pcs.render_matrix * vec4(inPosition, 1.0f);
+    mat4 model = obj.objects[gl_BaseInstance].model;
+    gl_Position = cam.viewproj * model * vec4(inPosition, 1.0f);
     outColor = inColor;
 }

@@ -19,6 +19,28 @@ struct FrameData {
     VkSemaphore imageAcquiredSemaphore;
     VkSemaphore renderSemaphore;
     VkFence renderFence;
+    BufferAllocation cameraBuffer;
+    BufferAllocation objectBuffer;
+    VkDescriptorSet globalDescriptor;
+    VkDescriptorSet objectDescriptor;
+};
+
+struct CameraData {
+    glm::mat4 view;
+    glm::mat4 proj;
+    glm::mat4 viewproj;
+};
+
+struct ObjectData {
+    glm::mat4 model;
+};
+
+struct SceneData {
+    glm::vec4 fogColor;
+    glm::vec4 fogDistance;
+    glm::vec4 ambientColor;
+    glm::vec4 sunlightDirection;
+    glm::vec4 sunlightColor;
 };
 
 class VKlelu
@@ -42,6 +64,8 @@ private:
     Material *create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name);
     Mesh *get_mesh(const std::string &name);
     Material *get_material(const std::string &name);
+    BufferAllocation create_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
+    size_t pad_uniform_buffer_size(size_t originalSize);
 
     bool init_vulkan();
     bool init_swapchain();
@@ -49,6 +73,7 @@ private:
     bool init_default_renderpass();
     bool init_framebuffers();
     bool init_sync_structures();
+    bool init_descriptors();
     bool init_pipelines();
 
     int frameCount;
@@ -65,6 +90,7 @@ private:
     VkInstance instance;
     VkDebugUtilsMessengerEXT debugMessenger;
     VkPhysicalDevice physicalDevice;
+    VkPhysicalDeviceProperties physicalDeviceProperties;
     VkDevice device;
     VkSurfaceKHR surface;
     VkQueue graphicsQueue;
@@ -82,5 +108,11 @@ private:
     VkRenderPass renderPass;
     std::vector<VkFramebuffer> framebuffers;
 
+    VkDescriptorPool descriptorPool;
+    VkDescriptorSetLayout globalSetLayout;
+    VkDescriptorSetLayout objectSetLayout;
+
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> frameData;
+    SceneData sceneParameters;
+    BufferAllocation sceneParameterBuffer;
 };

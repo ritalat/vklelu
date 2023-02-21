@@ -96,6 +96,30 @@ bool Mesh::load_obj_file(const char* filename, const char *baseDir)
     return true;
 }
 
+VkDescriptorSetLayoutBinding descriptor_layout_binding(VkDescriptorType type, VkShaderStageFlags stageFlags, uint32_t binding)
+{
+    VkDescriptorSetLayoutBinding setBinding = {};
+    setBinding.binding = binding;
+    setBinding.descriptorCount = 1;
+    setBinding.descriptorType = type;
+    setBinding.pImmutableSamplers = nullptr;
+    setBinding.stageFlags = stageFlags;
+    return setBinding;
+}
+
+VkWriteDescriptorSet write_descriptor_buffer(VkDescriptorType type, VkDescriptorSet dstSet, VkDescriptorBufferInfo *bufferInfo, uint32_t binding)
+{
+    VkWriteDescriptorSet write = {};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.pNext = nullptr;
+    write.dstBinding = binding;
+    write.dstSet = dstSet;
+    write.descriptorCount = 1;
+    write.descriptorType = type;
+    write.pBufferInfo = bufferInfo;
+    return write;
+}
+
 VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent)
 {
     VkImageCreateInfo info = {};
