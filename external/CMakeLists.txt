@@ -8,6 +8,9 @@ set(SDL_STATIC OFF)
 set(SDL_TEST OFF)
 add_subdirectory(SDL)
 
+add_library(stb INTERFACE)
+target_include_directories(stb INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/stb)
+
 add_subdirectory(tinyobjloader EXCLUDE_FROM_ALL)
 
 add_subdirectory(vk-bootstrap EXCLUDE_FROM_ALL)
