@@ -10,6 +10,7 @@
 #include "VkBootstrap.h"
 #include "vulkan/vulkan.h"
 
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -71,13 +72,14 @@ VKlelu::~VKlelu()
         vkDestroyPipeline(device, material.second.pipeline, nullptr);
     }
 
-    vkDestroySemaphore(device, imageAcquiredSemaphore, nullptr);
-    vkDestroySemaphore(device, renderSemaphore, nullptr);
-    vkDestroyFence(device, renderFence, nullptr);
+    for (FrameData frame : frameData) {
+        vkDestroySemaphore(device, frame.imageAcquiredSemaphore, nullptr);
+        vkDestroySemaphore(device, frame.renderSemaphore, nullptr);
+        vkDestroyFence(device, frame.renderFence, nullptr);
+        vkDestroyCommandPool(device, frame.commandPool, nullptr);
+    }
 
     vkDestroyRenderPass(device, renderPass, nullptr);
-
-    vkDestroyCommandPool(device, commandPool, nullptr);
 
     vkDestroyImageView(device, depthImageView, nullptr);
     vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
@@ -141,15 +143,17 @@ int VKlelu::run()
 
 void VKlelu::draw()
 {
-    VK_CHECK(vkWaitForFences(device, 1, &renderFence, true, NS_IN_SEC));
-    VK_CHECK(vkResetFences(device, 1, &renderFence));
+    FrameData currentFrame = get_current_frame();
+
+    VK_CHECK(vkWaitForFences(device, 1, &currentFrame.renderFence, true, NS_IN_SEC));
+    VK_CHECK(vkResetFences(device, 1, &currentFrame.renderFence));
 
     uint32_t swapchainImageIndex;
-    VK_CHECK(vkAcquireNextImageKHR(device, swapchain, NS_IN_SEC, imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
+    VK_CHECK(vkAcquireNextImageKHR(device, swapchain, NS_IN_SEC, currentFrame.imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
 
-    VK_CHECK(vkResetCommandBuffer(mainCommandBuffer, 0));
+    VK_CHECK(vkResetCommandBuffer(currentFrame.mainCommandBuffer, 0));
 
-    VkCommandBuffer cmd = mainCommandBuffer;
+    VkCommandBuffer cmd = currentFrame.mainCommandBuffer;
 
     VkCommandBufferBeginInfo cmdBeginInfo = command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
@@ -181,17 +185,17 @@ void VKlelu::draw()
     VkSubmitInfo submit = submit_info(&cmd);
     submit.pWaitDstStageMask = &waitStage;
     submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &imageAcquiredSemaphore;
+    submit.pWaitSemaphores = &currentFrame.imageAcquiredSemaphore;
     submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &renderSemaphore;
+    submit.pSignalSemaphores = &currentFrame.renderSemaphore;
 
-    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submit, renderFence));
+    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submit, currentFrame.renderFence));
 
     VkPresentInfoKHR presentInfo = present_info();
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &swapchain;
     presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &renderSemaphore;
+    presentInfo.pWaitSemaphores = &currentFrame.renderSemaphore;
     presentInfo.pImageIndices = &swapchainImageIndex;
 
     VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
@@ -227,6 +231,11 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
         }
         vkCmdDraw(cmd, himmeli.mesh->vertices.size(), 1, 0, 0);
     }
+}
+
+FrameData &VKlelu::get_current_frame()
+{
+    return frameData[frameCount % MAX_FRAMES_IN_FLIGHT];
 }
 
 bool VKlelu::wd_is_builddir()
@@ -481,11 +490,13 @@ bool VKlelu::init_swapchain()
 
 bool VKlelu::init_commands()
 {
-    VkCommandPoolCreateInfo commandPoolInfo = command_pool_create_info(graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-    VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &commandPool));
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        VkCommandPoolCreateInfo commandPoolInfo = command_pool_create_info(graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+        VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &frameData[i].commandPool));
 
-    VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(commandPool, 1);
-    VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &mainCommandBuffer));
+        VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(frameData[i].commandPool, 1);
+        VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &frameData[i].mainCommandBuffer));
+    }
 
     fprintf(stderr, "Command pool initialized successfully\n");
     return true;
@@ -582,12 +593,14 @@ bool VKlelu::init_framebuffers()
 
 bool VKlelu::init_sync_structures()
 {
-    VkFenceCreateInfo fenceCreateInfo = fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
-    VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &renderFence));
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        VkFenceCreateInfo fenceCreateInfo = fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
+        VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &frameData[i].renderFence));
 
-    VkSemaphoreCreateInfo semaphoreCreateInfo = semaphore_create_info();
-    VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &imageAcquiredSemaphore));
-    VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &renderSemaphore));
+        VkSemaphoreCreateInfo semaphoreCreateInfo = semaphore_create_info();
+        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frameData[i].imageAcquiredSemaphore));
+        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frameData[i].renderSemaphore));
+    }
 
     fprintf(stderr, "Sync structures initialized successfully\n");
     return true;

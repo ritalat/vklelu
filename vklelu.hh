@@ -6,9 +6,20 @@
 #include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"
 
+#include <array>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#define MAX_FRAMES_IN_FLIGHT 2
+
+struct FrameData {
+    VkCommandPool commandPool;
+    VkCommandBuffer mainCommandBuffer;
+    VkSemaphore imageAcquiredSemaphore;
+    VkSemaphore renderSemaphore;
+    VkFence renderFence;
+};
 
 class VKlelu
 {
@@ -20,6 +31,7 @@ public:
 private:
     void draw();
     void draw_objects(VkCommandBuffer cmd, Himmeli *first, int count);
+    FrameData &get_current_frame();
 
     bool wd_is_builddir();
 
@@ -67,13 +79,8 @@ private:
     VkImageView depthImageView;
     VkFormat depthImageFormat;
 
-    VkCommandPool commandPool;
-    VkCommandBuffer mainCommandBuffer;
-
     VkRenderPass renderPass;
     std::vector<VkFramebuffer> framebuffers;
 
-    VkSemaphore imageAcquiredSemaphore;
-    VkSemaphore renderSemaphore;
-    VkFence renderFence;
+    std::array<FrameData, MAX_FRAMES_IN_FLIGHT> frameData;
 };
