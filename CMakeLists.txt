@@ -62,6 +62,7 @@ target_link_libraries(VKlelu Vulkan::Vulkan
                              SDL2::SDL2
                              SDL2::SDL2main
                              glm::glm
+                             stb
                              tinyobjloader
                              vk-bootstrap::vk-bootstrap
                              VulkanMemoryAllocator)

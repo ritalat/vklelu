@@ -7,6 +7,7 @@
 #include "vulkan/vulkan.h"
 
 #include <array>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -23,6 +24,12 @@ struct FrameData {
     BufferAllocation objectBuffer;
     VkDescriptorSet globalDescriptor;
     VkDescriptorSet objectDescriptor;
+};
+
+struct UploadContext {
+    VkFence uploadFence;
+    VkCommandPool commandPool;
+    VkCommandBuffer commandBuffer;
 };
 
 struct CameraData {
@@ -60,6 +67,9 @@ private:
     void init_scene();
     void load_meshes();
     void upload_mesh(Mesh &mesh);
+    void immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function);
+    void load_images();
+    bool load_image(const char *path, ImageAllocation &image);
     bool load_shader(const char *path, VkShaderModule &module);
     Material *create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name);
     Mesh *get_mesh(const std::string &name);
@@ -81,6 +91,7 @@ private:
     std::vector<Himmeli> himmelit;
     std::unordered_map<std::string, Mesh> meshes;
     std::unordered_map<std::string, Material> materials;
+    std::unordered_map<std::string, Texture> textures;
 
     SDL_Window *window;
     VkExtent2D fbSize;
@@ -111,8 +122,11 @@ private:
     VkDescriptorPool descriptorPool;
     VkDescriptorSetLayout globalSetLayout;
     VkDescriptorSetLayout objectSetLayout;
+    VkDescriptorSetLayout singleTextureSetLayout;
 
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> frameData;
     SceneData sceneParameters;
     BufferAllocation sceneParameterBuffer;
+    UploadContext uploadContext;
+    VkSampler nearestSampler;
 };

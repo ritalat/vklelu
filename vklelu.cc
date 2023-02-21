@@ -6,6 +6,8 @@
 #include "glm/gtx/transform.hpp"
 #include "SDL.h"
 #include "SDL_vulkan.h"
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 #include "vk_mem_alloc.h"
 #include "VkBootstrap.h"
 #include "vulkan/vulkan.h"
@@ -15,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -75,11 +78,22 @@ VKlelu::~VKlelu()
         vkDestroyPipeline(device, material.second.pipeline, nullptr);
     }
 
+    for (auto texture : textures) {
+        vkDestroyImageView(device, texture.second.imageView, nullptr);
+        vmaDestroyImage(allocator, texture.second.image.image, texture.second.image.allocation);
+    }
+
+    vkDestroySampler(device, nearestSampler, nullptr);
+
+    vkDestroyDescriptorSetLayout(device, singleTextureSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(device, objectSetLayout, nullptr);
     vkDestroyDescriptorSetLayout(device, globalSetLayout, nullptr);
     vkDestroyDescriptorPool(device, descriptorPool, nullptr);
 
     vmaDestroyBuffer(allocator, sceneParameterBuffer.buffer, sceneParameterBuffer.allocation);
+
+    vkDestroyFence(device, uploadContext.uploadFence, nullptr);
+    vkDestroyCommandPool(device, uploadContext.commandPool, nullptr);
 
     for (FrameData frame : frameData) {
         vmaDestroyBuffer(allocator, frame.objectBuffer.buffer, frame.objectBuffer.allocation);
@@ -263,6 +277,10 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
             uint32_t uniformOffset = pad_uniform_buffer_size(sizeof(SceneData)) * frameIndex;
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipelineLayout, 0, 1, &currentFrame.globalDescriptor, 1, &uniformOffset);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipelineLayout, 1, 1, &currentFrame.objectDescriptor, 0, nullptr);
+
+            if (himmeli.material->textureSet != VK_NULL_HANDLE) {
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipelineLayout, 2, 1, &himmeli.material->textureSet, 0, nullptr);
+            }
         }
 
         glm::mat4 model = himmeli.transformations;
@@ -297,6 +315,7 @@ bool VKlelu::wd_is_builddir()
 void VKlelu::init_scene()
 {
     load_meshes();
+    load_images();
 
     Himmeli kapina;
     kapina.mesh = get_mesh("kapina");
@@ -311,6 +330,28 @@ void VKlelu::init_scene()
     glm::mat4 scale = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f, 0.2f, 0.2f });
     triangle.transformations = translation * scale;
     himmelit.push_back(triangle);
+
+    VkSamplerCreateInfo samplerInfo = sampler_create_info(VK_FILTER_NEAREST);
+    VK_CHECK(vkCreateSampler(device, &samplerInfo, nullptr, &nearestSampler));
+
+    Material *defaultMat = get_material("defaultMesh");
+
+    VkDescriptorSetAllocateInfo allocInfo = {};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.pNext = nullptr;
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &singleTextureSetLayout;
+    VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &defaultMat->textureSet));
+
+    VkDescriptorImageInfo imageInfo = {};
+    imageInfo.sampler = nearestSampler;
+    imageInfo.imageView = textures["kapina_diffuse"].imageView;
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+    VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, defaultMat->textureSet, &imageInfo, 0);
+
+    vkUpdateDescriptorSets(device, 1, &texture, 0, nullptr);
 }
 
 void VKlelu::load_meshes()
@@ -341,20 +382,169 @@ void VKlelu::load_meshes()
 
 void VKlelu::upload_mesh(Mesh &mesh)
 {
-    VkBufferCreateInfo bufferInfo = {};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = mesh.vertices.size() * sizeof(Vertex);
-    bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    size_t bufferSize = mesh.vertices.size() * sizeof(Vertex);
+
+    VkBufferCreateInfo stagingBufferInfo = {};
+    stagingBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    stagingBufferInfo.pNext = nullptr;
+    stagingBufferInfo.size = bufferSize;
+    stagingBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
     VmaAllocationCreateInfo vmaAllocInfo = {};
-    vmaAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+    vmaAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-    VK_CHECK(vmaCreateBuffer(allocator, &bufferInfo, &vmaAllocInfo, &mesh.vertexBuffer.buffer, &mesh.vertexBuffer.allocation, nullptr));
+    BufferAllocation stagingBuffer;
+
+    VK_CHECK(vmaCreateBuffer(allocator, &stagingBufferInfo, &vmaAllocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
 
     void *data;
-    vmaMapMemory(allocator, mesh.vertexBuffer.allocation, &data);
-    memcpy(data, mesh.vertices.data(), mesh.vertices.size() * sizeof(Vertex));
-    vmaUnmapMemory(allocator, mesh.vertexBuffer.allocation);
+    vmaMapMemory(allocator, stagingBuffer.allocation, &data);
+    memcpy(data, mesh.vertices.data(), bufferSize);
+    vmaUnmapMemory(allocator, stagingBuffer.allocation);
+
+    VkBufferCreateInfo vertexBufferInfo = {};
+    vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    vertexBufferInfo.pNext = nullptr;
+    vertexBufferInfo.size = bufferSize;
+    vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+    vmaAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    VK_CHECK(vmaCreateBuffer(allocator, &vertexBufferInfo, &vmaAllocInfo, &mesh.vertexBuffer.buffer, &mesh.vertexBuffer.allocation, nullptr));
+
+    immediate_submit([=](VkCommandBuffer cmd) {
+        VkBufferCopy copy;
+        copy.dstOffset = 0;
+        copy.srcOffset = 0;
+        copy.size = bufferSize;
+        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, mesh.vertexBuffer.buffer, 1, &copy);
+    });
+
+    vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+}
+
+void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function)
+{
+    VkCommandBuffer cmd = uploadContext.commandBuffer;
+    VkCommandBufferBeginInfo cmdBeginInfo = command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+    VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+
+    function(cmd);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo submitInfo = submit_info(&cmd);
+
+    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, uploadContext.uploadFence));
+
+    vkWaitForFences(device, 1, &uploadContext.uploadFence, true, UINT64_MAX);
+    vkResetFences(device, 1, &uploadContext.uploadFence);
+
+    vkResetCommandPool(device, uploadContext.commandPool, 0);
+}
+
+void VKlelu::load_images()
+{
+    Texture kapina;
+    std::string kapinaPath = "kultainenapina.jpg";
+
+    const char *baseDir = wd_is_builddir() ? "../" : nullptr;
+    if (baseDir)
+        kapinaPath = std::string(baseDir) + kapinaPath;
+
+    load_image(kapinaPath.c_str(), kapina.image);
+
+    VkImageViewCreateInfo viewInfo = imageview_create_info(VK_FORMAT_R8G8B8A8_SRGB, kapina.image.image, VK_IMAGE_ASPECT_COLOR_BIT);
+    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &kapina.imageView));
+
+    textures["kapina_diffuse"] = kapina;
+}
+
+bool VKlelu::load_image(const char *path, ImageAllocation &image)
+{
+    int width;
+    int height;
+    int channels;
+
+    stbi_uc *pixels = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
+
+    if (!pixels) {
+        fprintf(stderr, "Failed to load image: %s\n", path);
+        return false;
+    }
+
+    void *pixelPtr = pixels;
+    VkDeviceSize imageSize = width * height * 4;
+    VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
+
+    BufferAllocation stagingBuffer = create_buffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+
+    void *data;
+    vmaMapMemory(allocator, stagingBuffer.allocation, &data);
+    memcpy(data, pixelPtr, imageSize);
+    vmaUnmapMemory(allocator, stagingBuffer.allocation);
+
+    stbi_image_free(pixels);
+
+    VkExtent3D imageExtent;
+    imageExtent.width = width;
+    imageExtent.height = height;
+    imageExtent.depth = 1;
+
+    VkImageCreateInfo imgInfo = image_create_info(imageFormat, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, imageExtent);
+    VmaAllocationCreateInfo imgAllocInfo = {};
+    imgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    ImageAllocation newImage;
+    vmaCreateImage(allocator, &imgInfo, &imgAllocInfo, &newImage.image, &newImage.allocation, nullptr);
+
+    immediate_submit([&](VkCommandBuffer cmd) {
+        VkImageSubresourceRange range;
+        range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        range.baseMipLevel = 0;
+        range.levelCount = 1;
+        range.baseArrayLayer = 0;
+        range.layerCount = 1;
+
+        VkImageMemoryBarrier barrier = {};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.pNext = nullptr;
+        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier.image = newImage.image;
+        barrier.subresourceRange = range;
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+
+        VkBufferImageCopy copyRegion = {};
+        copyRegion.bufferOffset = 0;
+        copyRegion.bufferRowLength = 0;
+        copyRegion.bufferImageHeight = 0;
+        copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        copyRegion.imageSubresource.mipLevel = 0;
+        copyRegion.imageSubresource.baseArrayLayer = 0;
+        copyRegion.imageSubresource.layerCount = 1;
+        copyRegion.imageExtent = imageExtent;
+
+        vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+
+        VkImageMemoryBarrier barrier2 = barrier;
+        barrier2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        barrier2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        barrier2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier2);
+    });
+
+    vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+
+    image = newImage;
+
+    return true;
 }
 
 bool VKlelu::load_shader(const char *path, VkShaderModule &module)
@@ -577,6 +767,12 @@ bool VKlelu::init_commands()
         VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &frameData[i].mainCommandBuffer));
     }
 
+    VkCommandPoolCreateInfo uploadPoolInfo = command_pool_create_info(graphicsQueueFamily);
+    VK_CHECK(vkCreateCommandPool(device, &uploadPoolInfo, nullptr, &uploadContext.commandPool));
+
+    VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(uploadContext.commandPool, 1);
+    VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &uploadContext.commandBuffer));
+
     fprintf(stderr, "Command pool initialized successfully\n");
     return true;
 }
@@ -681,6 +877,9 @@ bool VKlelu::init_sync_structures()
         VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frameData[i].renderSemaphore));
     }
 
+    VkFenceCreateInfo uploadFenceInfo = fence_create_info();
+    VK_CHECK(vkCreateFence(device, &uploadFenceInfo, nullptr, &uploadContext.uploadFence));
+
     fprintf(stderr, "Sync structures initialized successfully\n");
     return true;
 }
@@ -714,9 +913,21 @@ bool VKlelu::init_descriptors()
 
     VK_CHECK(vkCreateDescriptorSetLayout(device, &set2Info, nullptr, &objectSetLayout));
 
+    VkDescriptorSetLayoutBinding textureBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0);
+
+    VkDescriptorSetLayoutCreateInfo set3Info = {};
+    set3Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    set3Info.pNext = nullptr;
+    set3Info.bindingCount = 1;
+    set3Info.flags = 0;
+    set3Info.pBindings = &textureBind;
+
+    VK_CHECK(vkCreateDescriptorSetLayout(device, &set3Info, nullptr, &singleTextureSetLayout));
+
     std::vector<VkDescriptorPoolSize> sizes = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 },
                                                 { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 10 },
-                                                { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 } };
+                                                { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 },
+                                                { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 10 } };
 
     VkDescriptorPoolCreateInfo poolInfo = {};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -794,12 +1005,12 @@ bool VKlelu::init_pipelines()
     pushConstant.size = sizeof(glm::mat4);
     pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
-    VkDescriptorSetLayout setLayouts[2] = { globalSetLayout, objectSetLayout };
+    VkDescriptorSetLayout setLayouts[3] = { globalSetLayout, objectSetLayout, singleTextureSetLayout };
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo = pipeline_layout_create_info();
     pipelineLayoutInfo.pPushConstantRanges = &pushConstant;
     pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.setLayoutCount = 2;
+    pipelineLayoutInfo.setLayoutCount = 3;
     pipelineLayoutInfo.pSetLayouts = setLayouts;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
 

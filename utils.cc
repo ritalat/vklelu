@@ -38,6 +38,13 @@ VertexInputDescription Vertex::get_description()
     colorAttribute.offset = offsetof(Vertex, color);
     description.attributes.push_back(colorAttribute);
 
+    VkVertexInputAttributeDescription uvAttribute = {};
+    uvAttribute.binding = 0;
+    uvAttribute.location = 3;
+    uvAttribute.format = VK_FORMAT_R32G32_SFLOAT;
+    uvAttribute.offset = offsetof(Vertex, uv);
+    description.attributes.push_back(uvAttribute);
+
     return description;
 }
 
@@ -77,6 +84,8 @@ bool Mesh::load_obj_file(const char* filename, const char *baseDir)
                 tinyobj::real_t nx = attrib.normals[3 * index.normal_index + 0];
                 tinyobj::real_t ny = attrib.normals[3 * index.normal_index + 1];
                 tinyobj::real_t nz = attrib.normals[3 * index.normal_index + 2];
+                tinyobj::real_t ux = attrib.texcoords[2 * index.texcoord_index + 0];
+                tinyobj::real_t uy = attrib.texcoords[2 * index.texcoord_index + 1];
 
                 Vertex vert;
                 vert.position.x = vx;
@@ -86,6 +95,8 @@ bool Mesh::load_obj_file(const char* filename, const char *baseDir)
                 vert.normal.y = ny;
                 vert.normal.z = nz;
                 vert.color = vert.normal;
+                vert.uv.x = ux;
+                vert.uv.y = 1-uy;
 
                 vertices.push_back(vert);
             }
@@ -118,6 +129,32 @@ VkWriteDescriptorSet write_descriptor_buffer(VkDescriptorType type, VkDescriptor
     write.descriptorType = type;
     write.pBufferInfo = bufferInfo;
     return write;
+}
+
+VkWriteDescriptorSet write_descriptor_image(VkDescriptorType type, VkDescriptorSet dstSet, VkDescriptorImageInfo *imageInfo, uint32_t binding)
+{
+    VkWriteDescriptorSet write = {};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.pNext = nullptr;
+    write.dstBinding = binding;
+    write.dstSet = dstSet;
+    write.descriptorCount = 1;
+    write.descriptorType = type;
+    write.pImageInfo = imageInfo;
+    return write;
+}
+
+VkSamplerCreateInfo sampler_create_info(VkFilter filters, VkSamplerAddressMode samplerAddressmode)
+{
+    VkSamplerCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    info.pNext = nullptr;
+    info.magFilter = filters;
+    info.minFilter = filters;
+    info.addressModeU = samplerAddressmode;
+    info.addressModeV = samplerAddressmode;
+    info.addressModeW = samplerAddressmode;
+    return info;
 }
 
 VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent)

@@ -46,6 +46,7 @@ struct Vertex
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec3 color;
+    glm::vec2 uv;
 };
 
 struct Mesh
@@ -59,6 +60,12 @@ struct Material
 {
     VkPipeline pipeline;
     VkPipelineLayout pipelineLayout;
+    VkDescriptorSet textureSet = VK_NULL_HANDLE;
+};
+
+struct Texture {
+    ImageAllocation image;
+    VkImageView imageView;
 };
 
 struct Himmeli
@@ -70,6 +77,8 @@ struct Himmeli
 
 VkDescriptorSetLayoutBinding descriptor_layout_binding(VkDescriptorType type, VkShaderStageFlags stageFlags, uint32_t binding);
 VkWriteDescriptorSet write_descriptor_buffer(VkDescriptorType type, VkDescriptorSet dstSet, VkDescriptorBufferInfo *bufferInfo, uint32_t binding);
+VkWriteDescriptorSet write_descriptor_image(VkDescriptorType type, VkDescriptorSet dstSet, VkDescriptorImageInfo *imageInfo, uint32_t binding);
+VkSamplerCreateInfo sampler_create_info(VkFilter filters, VkSamplerAddressMode samplerAddressmode = VK_SAMPLER_ADDRESS_MODE_REPEAT);
 VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent);
 VkImageViewCreateInfo imageview_create_info(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags);
 VkCommandPoolCreateInfo command_pool_create_info(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags flags = 0);
