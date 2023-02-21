@@ -21,6 +21,12 @@
         }                                                                                          \
     } while (0)
 
+struct ImageAllocation
+{
+    VkImage image;
+    VmaAllocation allocation;
+};
+
 struct BufferAllocation
 {
     VkBuffer buffer;
@@ -44,10 +50,13 @@ struct Vertex
 
 struct Mesh
 {
+    bool load_obj_file(const char *filename, const char *baseDir = nullptr);
     std::vector<Vertex> vertices;
     BufferAllocation vertexBuffer;
 };
 
+VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent);
+VkImageViewCreateInfo imageview_create_info(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags);
 VkCommandPoolCreateInfo command_pool_create_info(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags flags = 0);
 VkCommandBufferAllocateInfo command_buffer_allocate_info(VkCommandPool pool, uint32_t count = 1, VkCommandBufferLevel level = VK_COMMAND_BUFFER_LEVEL_PRIMARY);
 VkCommandBufferBeginInfo command_buffer_begin_info(VkCommandBufferUsageFlags flags = 0);
@@ -64,6 +73,7 @@ VkPipelineRasterizationStateCreateInfo rasterization_state_create_info(VkPolygon
 VkPipelineMultisampleStateCreateInfo multisampling_state_create_info();
 VkPipelineColorBlendAttachmentState color_blend_attachment_state();
 VkPipelineLayoutCreateInfo pipeline_layout_create_info();
+VkPipelineDepthStencilStateCreateInfo depth_stencil_create_info(VkBool32 depthTest, VkBool32 depthWrite, VkCompareOp compareOp = VK_COMPARE_OP_ALWAYS);
 
 struct PipelineBuilder
 {
@@ -78,4 +88,5 @@ struct PipelineBuilder
     VkPipelineColorBlendAttachmentState colorBlendAttachment;
     VkPipelineMultisampleStateCreateInfo multisampling;
     VkPipelineLayout pipelineLayout;
+    VkPipelineDepthStencilStateCreateInfo depthStencil;
 };

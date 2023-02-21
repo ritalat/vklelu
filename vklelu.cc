@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <string>
 #include <vector>
 
 #define WINDOW_WIDTH 1024
@@ -62,6 +63,7 @@ VKlelu::~VKlelu()
     vkDeviceWaitIdle(device);
 
     vmaDestroyBuffer(allocator, triangleMesh.vertexBuffer.buffer, triangleMesh.vertexBuffer.allocation);
+    vmaDestroyBuffer(allocator, kapinaMesh.vertexBuffer.buffer, kapinaMesh.vertexBuffer.allocation);
 
     vkDestroyPipelineLayout(device, meshPipelineLayout, nullptr);
     vkDestroyPipeline(device, meshPipeline, nullptr);
@@ -73,6 +75,9 @@ VKlelu::~VKlelu()
     vkDestroyRenderPass(device, renderPass, nullptr);
 
     vkDestroyCommandPool(device, commandPool, nullptr);
+
+    vkDestroyImageView(device, depthImageView, nullptr);
+    vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
 
     if (swapchain) {
         vkDestroySwapchainKHR(device, swapchain, nullptr);
@@ -152,25 +157,31 @@ void VKlelu::draw()
     float flash = abs(sin(frameCount / 120.0f));
     clearValue.color = { { 0.0f, 0.0f, flash, 1.0f } };
 
+    VkClearValue depthClearValue;
+    depthClearValue.depthStencil.depth = 1.0f;
+
+    VkClearValue clearValues[2] = { clearValue, depthClearValue };
+
     VkRenderPassBeginInfo rpInfo = renderpass_begin_info(renderPass, fbSize, framebuffers[swapchainImageIndex]);
-    rpInfo.clearValueCount = 1;
-    rpInfo.pClearValues = &clearValue;
+    rpInfo.clearValueCount = 2;
+    rpInfo.pClearValues = &clearValues[0];
 
     vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, meshPipeline);
 
     VkDeviceSize offset = 0;
-    vkCmdBindVertexBuffers(cmd, 0, 1, &triangleMesh.vertexBuffer.buffer, &offset);
+    vkCmdBindVertexBuffers(cmd, 0, 1, &kapinaMesh.vertexBuffer.buffer, &offset);
 
     glm::vec3 camera = { 0.0f, 0.0f, -2.0f };
     glm::mat4 view = glm::translate(glm::mat4(1.0f), camera);
     glm::mat4 model = glm::rotate(glm::mat4(1.0f), glm::radians(frameCount * 0.4f), glm::vec3(0, 1, 0));
     glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)fbSize.width/(float)fbSize.height, 0.1f, 200.0f);
+    projection[1][1] *= -1;
     glm::mat4 render_matrix = projection * view * model;
     vkCmdPushConstants(cmd, meshPipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &render_matrix);
 
-    vkCmdDraw(cmd, triangleMesh.vertices.size(), 1, 0, 0);
+    vkCmdDraw(cmd, kapinaMesh.vertices.size(), 1, 0, 0);
 
     vkCmdEndRenderPass(cmd);
 
@@ -199,6 +210,18 @@ void VKlelu::draw()
     ++frameCount;
 }
 
+bool VKlelu::wd_is_builddir()
+{
+    FILE *f = fopen("CMakeCache.txt", "r");
+    if (!f) {
+        return false;
+    } else {
+        fclose(f);
+        fprintf(stderr, "Running from build directory\n");
+        return true;
+    }
+}
+
 void VKlelu::load_meshes()
 {
     triangleMesh.vertices.resize(3);
@@ -209,6 +232,16 @@ void VKlelu::load_meshes()
     triangleMesh.vertices[1].color = { 0.0f, 1.0f, 0.0f };
     triangleMesh.vertices[2].color = { 0.0f, 0.0f, 1.0f };
     upload_mesh(triangleMesh);
+
+    const char *baseDir = wd_is_builddir() ? "../" : nullptr;
+    if(baseDir) {
+        fprintf(stderr, "Asset base directory: %s\n", baseDir);
+    } else {
+        fprintf(stderr, "Asset base directory: .\n");
+    }
+
+    kapinaMesh.load_obj_file("kultainenapina.obj", baseDir);
+    upload_mesh(kapinaMesh);
 }
 
 void VKlelu::upload_mesh(Mesh &mesh)
@@ -359,6 +392,22 @@ bool VKlelu::init_swapchain()
     swapchainImages = vkb_swapchain.get_images().value();
     swapchainImageViews = vkb_swapchain.get_image_views().value();
 
+    VkExtent3D depthImageExtent = {
+        fbSize.width,
+        fbSize.height,
+        1
+    };
+    depthImageFormat = VK_FORMAT_D32_SFLOAT;
+    VkImageCreateInfo depth_info = image_create_info(depthImageFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depthImageExtent);
+
+    VmaAllocationCreateInfo depth_alloc_info = {};
+    depth_alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    depth_alloc_info.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    vmaCreateImage(allocator, &depth_info, &depth_alloc_info, &depthImage.image, &depthImage.allocation, nullptr);
+
+    VkImageViewCreateInfo depth_view_info = imageview_create_info(depthImageFormat, depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
+    VK_CHECK(vkCreateImageView(device, &depth_view_info, nullptr, &depthImageView));
+
     fprintf(stderr, "Swapchain initialized successfully\n");
     return true;
 }
@@ -391,17 +440,54 @@ bool VKlelu::init_default_renderpass()
     color_attachment_ref.attachment = 0;
     color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+    VkAttachmentDescription depth_attachment = {};
+    depth_attachment.flags = 0;
+    depth_attachment.format = depthImageFormat;
+    depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentReference depth_attachment_ref = {};
+    depth_attachment_ref.attachment = 1;
+    depth_attachment_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
     VkSubpassDescription subpass = {};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &color_attachment_ref;
+    subpass.pDepthStencilAttachment = &depth_attachment_ref;
+
+    VkSubpassDependency dependency = {};
+    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass = 0;
+    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkSubpassDependency depth_dependency = {};
+    depth_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    depth_dependency.dstSubpass = 0;
+    depth_dependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    depth_dependency.srcAccessMask = 0;
+    depth_dependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    depth_dependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+    VkAttachmentDescription attachments[2] = { color_attachment, depth_attachment };
+    VkSubpassDependency dependencies[2] = { dependency, depth_dependency };
 
     VkRenderPassCreateInfo render_pass_info = {};
     render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    render_pass_info.attachmentCount = 1;
-    render_pass_info.pAttachments = &color_attachment;
+    render_pass_info.attachmentCount = 2;
+    render_pass_info.pAttachments = &attachments[0];
     render_pass_info.subpassCount = 1;
     render_pass_info.pSubpasses = &subpass;
+    render_pass_info.dependencyCount = 2;
+    render_pass_info.pDependencies = &dependencies[0];
 
     VK_CHECK(vkCreateRenderPass(device, &render_pass_info, nullptr, &renderPass));
 
@@ -417,7 +503,9 @@ bool VKlelu::init_framebuffers()
     framebuffers = std::vector<VkFramebuffer>(swapchainImageCount);
 
     for (int i = 0; i < swapchainImageCount; ++i) {
-        fb_info.pAttachments = &swapchainImageViews[i];
+        VkImageView attachments[2] = { swapchainImageViews[i], depthImageView };
+        fb_info.attachmentCount = 2;
+        fb_info.pAttachments = &attachments[0];
         VK_CHECK(vkCreateFramebuffer(device, &fb_info, nullptr, &framebuffers[i]));
     }
 

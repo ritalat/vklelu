@@ -18,6 +18,8 @@ public:
 private:
     void draw();
 
+    bool wd_is_builddir();
+
     void load_meshes();
     void upload_mesh(Mesh &mesh);
     bool load_shader(const char *path, VkShaderModule &module);
@@ -33,6 +35,7 @@ private:
     int frameCount;
 
     Mesh triangleMesh;
+    Mesh kapinaMesh;
 
     SDL_Window *window;
     VkExtent2D fbSize;
@@ -51,6 +54,10 @@ private:
     VkFormat swapchainImageFormat;
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
+
+    ImageAllocation depthImage;
+    VkImageView depthImageView;
+    VkFormat depthImageFormat;
 
     VkCommandPool commandPool;
     VkCommandBuffer mainCommandBuffer;

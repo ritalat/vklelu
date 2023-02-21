@@ -1,8 +1,10 @@
 #include "utils.hh"
 
+#include "tiny_obj_loader.h"
 #include "vulkan/vulkan.h"
 
 #include <cstdio>
+#include <string>
 #include <vector>
 
 VertexInputDescription Vertex::get_description()
@@ -37,6 +39,93 @@ VertexInputDescription Vertex::get_description()
     description.attributes.push_back(colorAttribute);
 
     return description;
+}
+
+bool Mesh::load_obj_file(const char* filename, const char *baseDir)
+{
+    std::string objPath(filename);
+    if (baseDir)
+        objPath = std::string(baseDir) + objPath;
+
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+
+    std::string warn;
+    std::string err;
+
+    tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, objPath.c_str(), baseDir);
+
+    if (!warn.empty())
+        fprintf(stderr, "TinyObj warn: %s\n", warn.c_str());
+
+    if (!err.empty()) {
+        fprintf(stderr, "TinyObj err: %s\n", err.c_str());
+        return false;
+    }
+
+    for (tinyobj::shape_t shape : shapes) {
+        size_t index_offset = 0;
+        size_t faces = shape.mesh.num_face_vertices.size();
+        for (size_t f = 0; f < faces; ++f) {
+            int faceverts = 3;
+            for (size_t v = 0; v < faceverts; ++v) {
+                tinyobj::index_t index = shape.mesh.indices[index_offset + v];
+                tinyobj::real_t vx = attrib.vertices[3 * index.vertex_index + 0];
+                tinyobj::real_t vy = attrib.vertices[3 * index.vertex_index + 1];
+                tinyobj::real_t vz = attrib.vertices[3 * index.vertex_index + 2];
+                tinyobj::real_t nx = attrib.normals[3 * index.normal_index + 0];
+                tinyobj::real_t ny = attrib.normals[3 * index.normal_index + 1];
+                tinyobj::real_t nz = attrib.normals[3 * index.normal_index + 2];
+
+                Vertex vert;
+                vert.position.x = vx;
+                vert.position.y = vy;
+                vert.position.z = vz;
+                vert.normal.x = nx;
+                vert.normal.y = ny;
+                vert.normal.z = nz;
+                vert.color = vert.normal;
+
+                vertices.push_back(vert);
+            }
+            index_offset += faceverts;
+        }
+    }
+
+    return true;
+}
+
+VkImageCreateInfo image_create_info(VkFormat format, VkImageUsageFlags usageFlags, VkExtent3D extent)
+{
+    VkImageCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    info.pNext = nullptr;
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = format;
+    info.extent = extent;
+    info.mipLevels = 1;
+    info.arrayLayers = 1;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = usageFlags;
+    return info;
+}
+
+VkImageViewCreateInfo imageview_create_info(VkFormat format, VkImage image, VkImageAspectFlags aspectFlags)
+{
+    VkImageViewCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    info.pNext = nullptr;
+    info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    info.image = image;
+    info.format = format;
+    info.subresourceRange.baseMipLevel = 0;
+    info.subresourceRange.levelCount = 1;
+    info.subresourceRange.baseArrayLayer = 0;
+    info.subresourceRange.layerCount = 1;
+    info.subresourceRange.aspectMask = aspectFlags;
+    return info;
 }
 
 VkCommandPoolCreateInfo command_pool_create_info(uint32_t queueFamilyIndex, VkCommandPoolCreateFlags flags)
@@ -229,12 +318,28 @@ VkPipelineLayoutCreateInfo pipeline_layout_create_info()
     return info;
 }
 
+VkPipelineDepthStencilStateCreateInfo depth_stencil_create_info(VkBool32 depthTest, VkBool32 depthWrite, VkCompareOp compareOp)
+{
+    VkPipelineDepthStencilStateCreateInfo info = {};
+    info.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+    info.pNext = nullptr;
+    info.depthTestEnable = depthTest;
+    info.depthWriteEnable = depthWrite;
+    info.depthCompareOp = compareOp;
+    info.depthBoundsTestEnable = VK_FALSE;
+    info.minDepthBounds = 0.0f;
+    info.maxDepthBounds = 1.0f;
+    info.stencilTestEnable = VK_FALSE;
+    return info;
+}
+
 void PipelineBuilder::use_default_ff()
 {
     inputAssembly = input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
     rasterizer = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
     multisampling = multisampling_state_create_info();
     colorBlendAttachment = color_blend_attachment_state();
+    depthStencil = depth_stencil_create_info(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
 }
 
 VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass)
@@ -267,6 +372,7 @@ VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkRenderPass pass)
     pipelineInfo.pMultisampleState = &multisampling;
     pipelineInfo.pColorBlendState = &colorBlending;
     pipelineInfo.layout = pipelineLayout;
+    pipelineInfo.pDepthStencilState = &depthStencil;
     pipelineInfo.renderPass = pass;
     pipelineInfo.subpass = 0;
     pipelineInfo.basePipelineHandle = VK_NULL_HANDLE;
