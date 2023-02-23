@@ -62,6 +62,7 @@ private:
     void draw_objects(VkCommandBuffer cmd, Himmeli *first, int count);
     FrameData &get_current_frame();
 
+    void set_runtime_dirs();
     bool wd_is_builddir();
 
     void init_scene();
@@ -85,6 +86,10 @@ private:
     bool init_sync_structures();
     bool init_descriptors();
     bool init_pipelines();
+
+    std::string assetDir;
+    std::string shaderDir;
+    bool wdIsBuildDir;
 
     int frameCount;
 

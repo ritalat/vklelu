@@ -64,6 +64,8 @@ VKlelu::VKlelu(int argc, char *argv[]):
 
     fprintf(stderr, "Window size: %ux%u\n", WINDOW_WIDTH, WINDOW_HEIGHT);
     fprintf(stderr, "Drawable size: %ux%u\n", fbSize.width, fbSize.height);
+
+    set_runtime_dirs();
 }
 
 VKlelu::~VKlelu()
@@ -300,6 +302,21 @@ FrameData &VKlelu::get_current_frame()
     return frameData[frameCount % MAX_FRAMES_IN_FLIGHT];
 }
 
+void VKlelu::set_runtime_dirs()
+{
+    wdIsBuildDir = wd_is_builddir();
+
+    char *ass = getenv("VKLELU_ASSETDIR");
+    assetDir = ass ? ass : wdIsBuildDir ? ".." : ".";
+    assetDir.push_back('/');
+    fprintf(stderr, "Asset directory: %s\n", assetDir.c_str());
+
+    char *sdr = getenv("VKLELU_SHADERDIR");
+    shaderDir = sdr ? sdr : ".";
+    shaderDir.push_back('/');
+    fprintf(stderr, "Shader directory: %s\n", shaderDir.c_str());
+}
+
 bool VKlelu::wd_is_builddir()
 {
     FILE *f = fopen("CMakeCache.txt", "r");
@@ -367,15 +384,8 @@ void VKlelu::load_meshes()
     upload_mesh(triangleMesh);
     meshes["triangle"] = triangleMesh;
 
-    const char *baseDir = wd_is_builddir() ? "../" : nullptr;
-    if(baseDir) {
-        fprintf(stderr, "Asset base directory: %s\n", baseDir);
-    } else {
-        fprintf(stderr, "Asset base directory: .\n");
-    }
-
     Mesh kapinaMesh;
-    kapinaMesh.load_obj_file("kultainenapina.obj", baseDir);
+    kapinaMesh.load_obj_file("kultainenapina.obj", assetDir.c_str());
     upload_mesh(kapinaMesh);
     meshes["kapina"] = kapinaMesh;
 }
@@ -447,13 +457,8 @@ void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&functi
 void VKlelu::load_images()
 {
     Texture kapina;
-    std::string kapinaPath = "kultainenapina.jpg";
 
-    const char *baseDir = wd_is_builddir() ? "../" : nullptr;
-    if (baseDir)
-        kapinaPath = std::string(baseDir) + kapinaPath;
-
-    load_image(kapinaPath.c_str(), kapina.image);
+    load_image("kultainenapina.jpg", kapina.image);
 
     VkImageViewCreateInfo viewInfo = imageview_create_info(VK_FORMAT_R8G8B8A8_SRGB, kapina.image.image, VK_IMAGE_ASPECT_COLOR_BIT);
     VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &kapina.imageView));
@@ -467,7 +472,9 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
     int height;
     int channels;
 
-    stbi_uc *pixels = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
+    std::string fullPath = assetDir + std::string(path);
+
+    stbi_uc *pixels = stbi_load(fullPath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
 
     if (!pixels) {
         fprintf(stderr, "Failed to load image: %s\n", path);
@@ -549,7 +556,9 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
 
 bool VKlelu::load_shader(const char *path, VkShaderModule &module)
 {
-    FILE *f = fopen(path, "rb");
+    std::string fullPath = shaderDir + std::string(path);
+
+    FILE *f = fopen(fullPath.c_str(), "rb");
     if (!f) {
         fprintf(stderr, "Failed to open file: %s\n", path);
         return false;

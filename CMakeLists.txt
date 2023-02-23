@@ -49,7 +49,13 @@ set(HEADERS utils.hh
 add_executable(VKlelu ${SOURCES} ${HEADERS})
 
 if(WIN32)
-    set_target_properties(VKlelu PROPERTIES WIN32_EXECUTABLE $<CONFIG:Release>)
+    # This only works with generated VS solutions
+    # When using VS builtin cmake support you must edit launch.vs.json instead
+    set(VSENV "VKLELU_ASSETDIR=${CMAKE_SOURCE_DIR}\nVKLELU_SHADERDIR=${CMAKE_BINARY_DIR}")
+    # Only set the correct subsystem for release builds
+    # This way we can easily see console output in debug builds
+    set_target_properties(VKlelu PROPERTIES WIN32_EXECUTABLE $<CONFIG:Release>
+                                            VS_DEBUGGER_ENVIRONMENT "${VSENV}")
 endif()
 
 if(UNIX)
