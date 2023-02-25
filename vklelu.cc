@@ -162,6 +162,7 @@ int VKlelu::run()
             }
         }
 
+        update();
         draw();
     }
 
@@ -264,7 +265,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
     ObjectData * objectSSBO = (ObjectData *)objData;
     for (int i = 0; i < count; ++i) {
         Himmeli &himmeli = first[i];
-        objectSSBO[i].model = himmeli.transformations;
+        objectSSBO[i].model = himmeli.translate * himmeli.rotate * himmeli.scale;
     }
     vmaUnmapMemory(allocator, currentFrame.objectBuffer.allocation);
 
@@ -285,8 +286,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
             }
         }
 
-        glm::mat4 model = himmeli.transformations;
-        vkCmdPushConstants(cmd, himmeli.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(glm::mat4), &model);
+        vkCmdPushConstants(cmd, himmeli.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(int), &i);
 
         if (himmeli.mesh != lastMesh) {
             VkDeviceSize offset = 0;
@@ -294,6 +294,13 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
             lastMesh = himmeli.mesh;
         }
         vkCmdDraw(cmd, himmeli.mesh->vertices.size(), 1, 0, 0);
+    }
+}
+
+void VKlelu::update()
+{
+    for (Himmeli &himmeli : himmelit) {
+        himmeli.rotate = glm::rotate(glm::mat4{ 1.0f }, glm::radians(frameCount * 0.4f), glm::vec3(0, 1, 0));
     }
 }
 
@@ -337,15 +344,17 @@ void VKlelu::init_scene()
     Himmeli kapina;
     kapina.mesh = get_mesh("kapina");
     kapina.material = get_material("defaultMesh");
-    kapina.transformations = glm::mat4{ 1.0f };
+    kapina.scale = glm::mat4{ 1.0f };
+    kapina.rotate = glm::mat4{ 1.0f };
+    kapina.translate = glm::mat4{ 1.0f };
     himmelit.push_back(kapina);
 
     Himmeli triangle;
     triangle.mesh = get_mesh("triangle");
     triangle.material = get_material("defaultMesh");
-    glm::mat4 translation = glm::translate(glm::mat4{ 1.0f }, glm::vec3(-5.0f, 0.0f, -5.0f));
-    glm::mat4 scale = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f, 0.2f, 0.2f });
-    triangle.transformations = translation * scale;
+    triangle.scale = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f, 0.2f, 0.2f });
+    triangle.rotate = glm::mat4{ 1.0f };
+    triangle.translate = glm::translate(glm::mat4{ 1.0f }, glm::vec3(-5.0f, 0.0f, -5.0f));
     himmelit.push_back(triangle);
 
     VkSamplerCreateInfo samplerInfo = sampler_create_info(VK_FILTER_NEAREST);
@@ -1011,7 +1020,7 @@ bool VKlelu::init_pipelines()
 
     VkPushConstantRange pushConstant;
     pushConstant.offset = 0;
-    pushConstant.size = sizeof(glm::mat4);
+    pushConstant.size = sizeof(int);
     pushConstant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 
     VkDescriptorSetLayout setLayouts[3] = { globalSetLayout, objectSetLayout, singleTextureSetLayout };

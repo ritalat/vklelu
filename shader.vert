@@ -23,12 +23,12 @@ layout (std140, set = 1, binding = 0) readonly buffer ObjectBuffer {
 } obj;
 
 layout (push_constant) uniform PushConstants {
-    mat4 model;
+    int modelIndex;
 } pcs;
 
 void main()
 {
-    mat4 model = obj.objects[gl_BaseInstance].model;
+    mat4 model = obj.objects[pcs.modelIndex].model;
     gl_Position = cam.viewproj * model * vec4(inPosition, 1.0f);
     outColor = inColor;
     texCoord = inTexCoord;

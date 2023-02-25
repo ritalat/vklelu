@@ -60,6 +60,7 @@ public:
 private:
     void draw();
     void draw_objects(VkCommandBuffer cmd, Himmeli *first, int count);
+    void update();
     FrameData &get_current_frame();
 
     void set_runtime_dirs();

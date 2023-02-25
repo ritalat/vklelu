@@ -72,7 +72,9 @@ struct Himmeli
 {
     Mesh *mesh;
     Material *material;
-    glm::mat4 transformations;
+    glm::mat4 scale;
+    glm::mat4 rotate;
+    glm::mat4 translate;
 };
 
 VkDescriptorSetLayoutBinding descriptor_layout_binding(VkDescriptorType type, VkShaderStageFlags stageFlags, uint32_t binding);
