@@ -7,6 +7,7 @@
 #include "vulkan/vulkan.h"
 
 #include <array>
+#include <deque>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -135,4 +136,6 @@ private:
     BufferAllocation sceneParameterBuffer;
     UploadContext uploadContext;
     VkSampler nearestSampler;
+
+    std::deque<std::function<void()>> resourceJanitor;
 };

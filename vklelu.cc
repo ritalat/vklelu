@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -35,8 +36,7 @@ VKlelu::VKlelu(int argc, char *argv[]):
     instance(nullptr),
     surface(nullptr),
     device(nullptr),
-    allocator(nullptr),
-    swapchain(nullptr)
+    allocator(nullptr)
 {
     (void)argc;
     (void)argv;
@@ -72,51 +72,8 @@ VKlelu::~VKlelu()
 {
     vkDeviceWaitIdle(device);
 
-    for (auto mesh : meshes)
-        vmaDestroyBuffer(allocator, mesh.second.vertexBuffer.buffer, mesh.second.vertexBuffer.allocation);
-
-    for (auto material : materials) {
-        vkDestroyPipelineLayout(device, material.second.pipelineLayout, nullptr);
-        vkDestroyPipeline(device, material.second.pipeline, nullptr);
-    }
-
-    for (auto texture : textures) {
-        vkDestroyImageView(device, texture.second.imageView, nullptr);
-        vmaDestroyImage(allocator, texture.second.image.image, texture.second.image.allocation);
-    }
-
-    vkDestroySampler(device, nearestSampler, nullptr);
-
-    vkDestroyDescriptorSetLayout(device, singleTextureSetLayout, nullptr);
-    vkDestroyDescriptorSetLayout(device, objectSetLayout, nullptr);
-    vkDestroyDescriptorSetLayout(device, globalSetLayout, nullptr);
-    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-
-    vmaDestroyBuffer(allocator, sceneParameterBuffer.buffer, sceneParameterBuffer.allocation);
-
-    vkDestroyFence(device, uploadContext.uploadFence, nullptr);
-    vkDestroyCommandPool(device, uploadContext.commandPool, nullptr);
-
-    for (FrameData frame : frameData) {
-        vmaDestroyBuffer(allocator, frame.objectBuffer.buffer, frame.objectBuffer.allocation);
-        vmaDestroyBuffer(allocator, frame.cameraBuffer.buffer, frame.cameraBuffer.allocation);
-        vkDestroySemaphore(device, frame.imageAcquiredSemaphore, nullptr);
-        vkDestroySemaphore(device, frame.renderSemaphore, nullptr);
-        vkDestroyFence(device, frame.renderFence, nullptr);
-        vkDestroyCommandPool(device, frame.commandPool, nullptr);
-    }
-
-    vkDestroyRenderPass(device, renderPass, nullptr);
-
-    vkDestroyImageView(device, depthImageView, nullptr);
-    vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
-
-    if (swapchain) {
-        vkDestroySwapchainKHR(device, swapchain, nullptr);
-        for (int i = 0; i < swapchainImageViews.size(); ++i) {
-            vkDestroyFramebuffer(device, framebuffers[i], nullptr);
-            vkDestroyImageView(device, swapchainImageViews[i], nullptr);
-        }
+    for (auto destroyfn : resourceJanitor) {
+        destroyfn();
     }
 
     if (allocator)
@@ -135,6 +92,7 @@ VKlelu::~VKlelu()
 
     if (window)
         SDL_DestroyWindow(window);
+
     SDL_Quit();
 }
 
@@ -359,6 +317,7 @@ void VKlelu::init_scene()
 
     VkSamplerCreateInfo samplerInfo = sampler_create_info(VK_FILTER_NEAREST);
     VK_CHECK(vkCreateSampler(device, &samplerInfo, nullptr, &nearestSampler));
+    resourceJanitor.push_back([=](){ vkDestroySampler(device, nearestSampler, nullptr); });
 
     Material *defaultMat = get_material("defaultMesh");
 
@@ -392,11 +351,13 @@ void VKlelu::load_meshes()
     triangleMesh.vertices[2].color = { 0.0f, 0.0f, 1.0f };
     upload_mesh(triangleMesh);
     meshes["triangle"] = triangleMesh;
+    resourceJanitor.push_back([=](){ vmaDestroyBuffer(allocator, triangleMesh.vertexBuffer.buffer, triangleMesh.vertexBuffer.allocation); });
 
     Mesh kapinaMesh;
     kapinaMesh.load_obj_file("kultainenapina.obj", assetDir.c_str());
     upload_mesh(kapinaMesh);
     meshes["kapina"] = kapinaMesh;
+    resourceJanitor.push_back([=](){ vmaDestroyBuffer(allocator, kapinaMesh.vertexBuffer.buffer, kapinaMesh.vertexBuffer.allocation); });
 }
 
 void VKlelu::upload_mesh(Mesh &mesh)
@@ -471,6 +432,11 @@ void VKlelu::load_images()
 
     VkImageViewCreateInfo viewInfo = imageview_create_info(VK_FORMAT_R8G8B8A8_SRGB, kapina.image.image, VK_IMAGE_ASPECT_COLOR_BIT);
     VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &kapina.imageView));
+
+    resourceJanitor.push_back([=](){
+        vmaDestroyImage(allocator, kapina.image.image, kapina.image.allocation);
+        vkDestroyImageView(device, kapina.imageView, nullptr);
+    });
 
     textures["kapina_diffuse"] = kapina;
 }
@@ -755,6 +721,8 @@ bool VKlelu::init_swapchain()
     swapchainImages = vkb_swapchain.get_images().value();
     swapchainImageViews = vkb_swapchain.get_image_views().value();
 
+    resourceJanitor.push_back([=](){ vkDestroySwapchainKHR(device, swapchain, nullptr); });
+
     VkExtent3D depthImageExtent = {
         fbSize.width,
         fbSize.height,
@@ -771,6 +739,11 @@ bool VKlelu::init_swapchain()
     VkImageViewCreateInfo depth_view_info = imageview_create_info(depthImageFormat, depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
     VK_CHECK(vkCreateImageView(device, &depth_view_info, nullptr, &depthImageView));
 
+    resourceJanitor.push_back([=](){
+        vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
+        vkDestroyImageView(device, depthImageView, nullptr);
+    });
+
     fprintf(stderr, "Swapchain initialized successfully\n");
     return true;
 }
@@ -783,6 +756,8 @@ bool VKlelu::init_commands()
 
         VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(frameData[i].commandPool, 1);
         VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &frameData[i].mainCommandBuffer));
+
+        resourceJanitor.push_back([=](){ vkDestroyCommandPool(device, frameData[i].commandPool, nullptr); });
     }
 
     VkCommandPoolCreateInfo uploadPoolInfo = command_pool_create_info(graphicsQueueFamily);
@@ -790,6 +765,8 @@ bool VKlelu::init_commands()
 
     VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(uploadContext.commandPool, 1);
     VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &uploadContext.commandBuffer));
+
+    resourceJanitor.push_back([=](){ vkDestroyCommandPool(device, uploadContext.commandPool, nullptr); });
 
     fprintf(stderr, "Command pool initialized successfully\n");
     return true;
@@ -862,6 +839,8 @@ bool VKlelu::init_default_renderpass()
 
     VK_CHECK(vkCreateRenderPass(device, &render_pass_info, nullptr, &renderPass));
 
+    resourceJanitor.push_back([=](){ vkDestroyRenderPass(device, renderPass, nullptr); });
+
     fprintf(stderr, "Renderpass initialized successfully\n");
     return true;
 }
@@ -878,6 +857,11 @@ bool VKlelu::init_framebuffers()
         fb_info.attachmentCount = 2;
         fb_info.pAttachments = &attachments[0];
         VK_CHECK(vkCreateFramebuffer(device, &fb_info, nullptr, &framebuffers[i]));
+
+        resourceJanitor.push_back([=](){
+            vkDestroyImageView(device, swapchainImageViews[i], nullptr);
+            vkDestroyFramebuffer(device, framebuffers[i], nullptr);
+        });
     }
 
     fprintf(stderr, "Framebuffers initialized successfully\n");
@@ -893,10 +877,17 @@ bool VKlelu::init_sync_structures()
         VkSemaphoreCreateInfo semaphoreCreateInfo = semaphore_create_info();
         VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frameData[i].imageAcquiredSemaphore));
         VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frameData[i].renderSemaphore));
+
+        resourceJanitor.push_back([=](){
+            vkDestroyFence(device, frameData[i].renderFence, nullptr);
+            vkDestroySemaphore(device, frameData[i].imageAcquiredSemaphore, nullptr);
+            vkDestroySemaphore(device, frameData[i].renderSemaphore, nullptr);
+        });
     }
 
     VkFenceCreateInfo uploadFenceInfo = fence_create_info();
     VK_CHECK(vkCreateFence(device, &uploadFenceInfo, nullptr, &uploadContext.uploadFence));
+    resourceJanitor.push_back([=](){ vkDestroyFence(device, uploadContext.uploadFence, nullptr); });
 
     fprintf(stderr, "Sync structures initialized successfully\n");
     return true;
@@ -906,6 +897,8 @@ bool VKlelu::init_descriptors()
 {
     size_t sceneParamBufferSize = MAX_FRAMES_IN_FLIGHT * pad_uniform_buffer_size(sizeof(SceneData));
     sceneParameterBuffer = create_buffer(sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+    resourceJanitor.push_back([=](){ vmaDestroyBuffer(allocator, sceneParameterBuffer.buffer, sceneParameterBuffer.allocation); });
 
     VkDescriptorSetLayoutBinding camBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
     VkDescriptorSetLayoutBinding sceneBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 1);
@@ -920,6 +913,8 @@ bool VKlelu::init_descriptors()
 
     VK_CHECK(vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &globalSetLayout));
 
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(device, globalSetLayout, nullptr); });
+
     VkDescriptorSetLayoutBinding objectBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
 
     VkDescriptorSetLayoutCreateInfo set2Info = {};
@@ -931,6 +926,8 @@ bool VKlelu::init_descriptors()
 
     VK_CHECK(vkCreateDescriptorSetLayout(device, &set2Info, nullptr, &objectSetLayout));
 
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(device, objectSetLayout, nullptr); });
+
     VkDescriptorSetLayoutBinding textureBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0);
 
     VkDescriptorSetLayoutCreateInfo set3Info = {};
@@ -941,6 +938,8 @@ bool VKlelu::init_descriptors()
     set3Info.pBindings = &textureBind;
 
     VK_CHECK(vkCreateDescriptorSetLayout(device, &set3Info, nullptr, &singleTextureSetLayout));
+
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(device, singleTextureSetLayout, nullptr); });
 
     std::vector<VkDescriptorPoolSize> sizes = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 },
                                                 { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 10 },
@@ -957,9 +956,16 @@ bool VKlelu::init_descriptors()
 
     VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool));
 
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorPool(device, descriptorPool, nullptr); });
+
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         frameData[i].cameraBuffer = create_buffer(sizeof(CameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
         frameData[i].objectBuffer = create_buffer(sizeof(ObjectData) * MAX_OBJECTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+
+        resourceJanitor.push_back([=](){
+            vmaDestroyBuffer(allocator, frameData[i].cameraBuffer.buffer, frameData[i].cameraBuffer.allocation);
+            vmaDestroyBuffer(allocator, frameData[i].objectBuffer.buffer, frameData[i].objectBuffer.allocation);
+        });
 
         VkDescriptorSetAllocateInfo allocInfo = {};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -1032,6 +1038,8 @@ bool VKlelu::init_pipelines()
     pipelineLayoutInfo.pSetLayouts = setLayouts;
     VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
 
+    resourceJanitor.push_back([=](){ vkDestroyPipelineLayout(device, meshPipelineLayout, nullptr); });
+
     VertexInputDescription vertexDescription = Vertex::get_description();
 
     PipelineBuilder builder;
@@ -1053,6 +1061,8 @@ bool VKlelu::init_pipelines()
     builder.scissor.extent = fbSize;
     builder.pipelineLayout = meshPipelineLayout;
     meshPipeline = builder.build_pipeline(device, renderPass);
+
+    resourceJanitor.push_back([=](){ vkDestroyPipeline(device, meshPipeline, nullptr); });
 
     vkDestroyShaderModule(device, vertShader, nullptr);
     vkDestroyShaderModule(device, fragShader, nullptr);
