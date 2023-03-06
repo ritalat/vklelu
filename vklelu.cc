@@ -193,7 +193,8 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
 {
     FrameData currentFrame = get_current_frame();
 
-    glm::vec3 camera = { 0.0f, 0.0f, -2.0f };
+    glm::vec3 camera = { 0.0f, 0.0f, -5.0f };
+    sceneParameters.cameraPos = glm::vec4{ camera, 1.0f };
     glm::mat4 view = glm::translate(glm::mat4(1.0f), camera);
     glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)fbSize.width/(float)fbSize.height, 0.1f, 200.0f);
     projection[1][1] *= -1;
@@ -207,9 +208,6 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
     vmaMapMemory(allocator, currentFrame.cameraBuffer.allocation, &camData);
     memcpy(camData, &cam, sizeof(cam));
     vmaUnmapMemory(allocator, currentFrame.cameraBuffer.allocation);
-
-    float framed = (frameCount / 120.0f);
-    sceneParameters.ambientColor = { sin(framed), 0.0f, cos(framed), 1.0f };
 
     char *sceneData;
     vmaMapMemory(allocator, sceneParameterBuffer.allocation, (void**)&sceneData);
@@ -337,6 +335,9 @@ void VKlelu::init_scene()
     VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, defaultMat->textureSet, &imageInfo, 0);
 
     vkUpdateDescriptorSets(device, 1, &texture, 0, nullptr);
+
+    sceneParameters.lightPos = { 10.0f, 10.0f, 10.0f, 0.0f };
+    sceneParameters.lightColor = { 1.0f, 1.0f, 1.0f, 0.0f };
 }
 
 void VKlelu::load_meshes()

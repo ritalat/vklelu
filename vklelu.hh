@@ -44,11 +44,9 @@ struct ObjectData {
 };
 
 struct SceneData {
-    glm::vec4 fogColor;
-    glm::vec4 fogDistance;
-    glm::vec4 ambientColor;
-    glm::vec4 sunlightDirection;
-    glm::vec4 sunlightColor;
+    glm::vec4 cameraPos;
+    glm::vec4 lightPos;
+    glm::vec4 lightColor;
 };
 
 class VKlelu
