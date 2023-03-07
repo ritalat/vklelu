@@ -475,12 +475,7 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
     imageExtent.height = height;
     imageExtent.depth = 1;
 
-    VkImageCreateInfo imgInfo = image_create_info(imageFormat, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, imageExtent);
-    VmaAllocationCreateInfo imgAllocInfo = {};
-    imgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    ImageAllocation newImage;
-    vmaCreateImage(allocator, &imgInfo, &imgAllocInfo, &newImage.image, &newImage.allocation, nullptr);
+    ImageAllocation newImage = create_image(imageExtent, imageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
     immediate_submit([&](VkCommandBuffer cmd) {
         VkImageSubresourceRange range;
@@ -608,6 +603,20 @@ BufferAllocation VKlelu::create_buffer(size_t size, VkBufferUsageFlags usage, Vm
     return buffer;
 }
 
+ImageAllocation VKlelu::create_image(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage)
+{
+    VkImageCreateInfo imgInfo = image_create_info(format, usage, extent);
+    imgInfo.samples = samples;
+
+    VmaAllocationCreateInfo imgAllocInfo = {};
+    imgAllocInfo.usage = memoryUsage;
+    imgAllocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+    ImageAllocation image;
+    vmaCreateImage(allocator, &imgInfo, &imgAllocInfo, &image.image, &image.allocation, nullptr);
+    return image;
+}
+
 size_t VKlelu::pad_uniform_buffer_size(size_t originalSize)
 {
     size_t minUboAllignment = physicalDeviceProperties.limits.minUniformBufferOffsetAlignment;
@@ -649,6 +658,8 @@ bool VKlelu::init_vulkan()
     vkb::PhysicalDevice vkb_phys = phys_ret.value();
     physicalDevice = vkb_phys.physical_device;
     physicalDeviceProperties = vkb_phys.properties;
+
+    msaaLevel = VK_SAMPLE_COUNT_4_BIT;
 
     VkPhysicalDeviceShaderDrawParametersFeatures shaderParamFeatures = {};
     shaderParamFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
@@ -724,23 +735,26 @@ bool VKlelu::init_swapchain()
 
     resourceJanitor.push_back([=](){ vkDestroySwapchainKHR(device, swapchain, nullptr); });
 
-    VkExtent3D depthImageExtent = {
+    VkExtent3D imageExtent = {
         fbSize.width,
         fbSize.height,
         1
     };
     depthImageFormat = VK_FORMAT_D32_SFLOAT;
-    VkImageCreateInfo depth_info = image_create_info(depthImageFormat, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, depthImageExtent);
 
-    VmaAllocationCreateInfo depth_alloc_info = {};
-    depth_alloc_info.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    depth_alloc_info.requiredFlags = VkMemoryPropertyFlags(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    vmaCreateImage(allocator, &depth_info, &depth_alloc_info, &depthImage.image, &depthImage.allocation, nullptr);
+    colorImage = create_image(imageExtent, swapchainImageFormat, msaaLevel, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
-    VkImageViewCreateInfo depth_view_info = imageview_create_info(depthImageFormat, depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
-    VK_CHECK(vkCreateImageView(device, &depth_view_info, nullptr, &depthImageView));
+    VkImageViewCreateInfo imageViewInfo = imageview_create_info(swapchainImageFormat, colorImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
+    VK_CHECK(vkCreateImageView(device, &imageViewInfo, nullptr, &colorImageView));
+
+    depthImage = create_image(imageExtent, depthImageFormat, msaaLevel, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+
+    VkImageViewCreateInfo depthViewInfo = imageview_create_info(depthImageFormat, depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
+    VK_CHECK(vkCreateImageView(device, &depthViewInfo, nullptr, &depthImageView));
 
     resourceJanitor.push_back([=](){
+        vmaDestroyImage(allocator, colorImage.image, colorImage.allocation);
+        vkDestroyImageView(device, colorImageView, nullptr);
         vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
         vkDestroyImageView(device, depthImageView, nullptr);
     });
@@ -775,40 +789,55 @@ bool VKlelu::init_commands()
 
 bool VKlelu::init_default_renderpass()
 {
-    VkAttachmentDescription color_attachment = {};
-    color_attachment.format = swapchainImageFormat;
-    color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    VkAttachmentDescription colorAttachment = {};
+    colorAttachment.format = swapchainImageFormat;
+    colorAttachment.samples = msaaLevel;
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentReference color_attachment_ref = {};
-    color_attachment_ref.attachment = 0;
-    color_attachment_ref.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference colorAttachmentRef = {};
+    colorAttachmentRef.attachment = 0;
+    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentDescription depth_attachment = {};
-    depth_attachment.flags = 0;
-    depth_attachment.format = depthImageFormat;
-    depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    VkAttachmentDescription depthAttachment = {};
+    depthAttachment.flags = 0;
+    depthAttachment.format = depthImageFormat;
+    depthAttachment.samples = msaaLevel;
+    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentReference depth_attachment_ref = {};
-    depth_attachment_ref.attachment = 1;
-    depth_attachment_ref.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+    VkAttachmentReference depthAttachmentRef = {};
+    depthAttachmentRef.attachment = 1;
+    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkAttachmentDescription colorAttachmentResolve = {};
+    colorAttachmentResolve.format = swapchainImageFormat;
+    colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference colorAttachmentResolveRef = {};
+    colorAttachmentResolveRef.attachment = 2;
+    colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
     VkSubpassDescription subpass = {};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &color_attachment_ref;
-    subpass.pDepthStencilAttachment = &depth_attachment_ref;
+    subpass.pColorAttachments = &colorAttachmentRef;
+    subpass.pDepthStencilAttachment = &depthAttachmentRef;
+    subpass.pResolveAttachments = &colorAttachmentResolveRef;
 
     VkSubpassDependency dependency = {};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -818,27 +847,27 @@ bool VKlelu::init_default_renderpass()
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-    VkSubpassDependency depth_dependency = {};
-    depth_dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    depth_dependency.dstSubpass = 0;
-    depth_dependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    depth_dependency.srcAccessMask = 0;
-    depth_dependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    depth_dependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    VkSubpassDependency depthDependency = {};
+    depthDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+    depthDependency.dstSubpass = 0;
+    depthDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    depthDependency.srcAccessMask = 0;
+    depthDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    depthDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-    VkAttachmentDescription attachments[2] = { color_attachment, depth_attachment };
-    VkSubpassDependency dependencies[2] = { dependency, depth_dependency };
+    VkAttachmentDescription attachments[3] = { colorAttachment, depthAttachment, colorAttachmentResolve };
+    VkSubpassDependency dependencies[2] = { dependency, depthDependency };
 
-    VkRenderPassCreateInfo render_pass_info = {};
-    render_pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    render_pass_info.attachmentCount = 2;
-    render_pass_info.pAttachments = &attachments[0];
-    render_pass_info.subpassCount = 1;
-    render_pass_info.pSubpasses = &subpass;
-    render_pass_info.dependencyCount = 2;
-    render_pass_info.pDependencies = &dependencies[0];
+    VkRenderPassCreateInfo renderPassInfo = {};
+    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    renderPassInfo.attachmentCount = 3;
+    renderPassInfo.pAttachments = &attachments[0];
+    renderPassInfo.subpassCount = 1;
+    renderPassInfo.pSubpasses = &subpass;
+    renderPassInfo.dependencyCount = 2;
+    renderPassInfo.pDependencies = &dependencies[0];
 
-    VK_CHECK(vkCreateRenderPass(device, &render_pass_info, nullptr, &renderPass));
+    VK_CHECK(vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass));
 
     resourceJanitor.push_back([=](){ vkDestroyRenderPass(device, renderPass, nullptr); });
 
@@ -848,16 +877,16 @@ bool VKlelu::init_default_renderpass()
 
 bool VKlelu::init_framebuffers()
 {
-    VkFramebufferCreateInfo fb_info = framebuffer_create_info(renderPass, fbSize);
+    VkFramebufferCreateInfo fbInfo = framebuffer_create_info(renderPass, fbSize);
 
     uint32_t swapchainImageCount = swapchainImages.size();
     framebuffers = std::vector<VkFramebuffer>(swapchainImageCount);
 
     for (int i = 0; i < swapchainImageCount; ++i) {
-        VkImageView attachments[2] = { swapchainImageViews[i], depthImageView };
-        fb_info.attachmentCount = 2;
-        fb_info.pAttachments = &attachments[0];
-        VK_CHECK(vkCreateFramebuffer(device, &fb_info, nullptr, &framebuffers[i]));
+        VkImageView attachments[3] = { colorImageView, depthImageView, swapchainImageViews[i] };
+        fbInfo.attachmentCount = 3;
+        fbInfo.pAttachments = &attachments[0];
+        VK_CHECK(vkCreateFramebuffer(device, &fbInfo, nullptr, &framebuffers[i]));
 
         resourceJanitor.push_back([=](){
             vkDestroyImageView(device, swapchainImageViews[i], nullptr);
@@ -1052,6 +1081,7 @@ bool VKlelu::init_pipelines()
     builder.vertexInputInfo.vertexAttributeDescriptionCount = vertexDescription.attributes.size();
     builder.vertexInputInfo.pVertexBindingDescriptions = vertexDescription.bindings.data();
     builder.vertexInputInfo.vertexBindingDescriptionCount = vertexDescription.bindings.size();
+    builder.multisampling.rasterizationSamples = msaaLevel;
     builder.viewport.x = 0.0f;
     builder.viewport.y = 0.0f;
     builder.viewport.width = fbSize.width;

@@ -76,6 +76,7 @@ private:
     Mesh *get_mesh(const std::string &name);
     Material *get_material(const std::string &name);
     BufferAllocation create_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
+    ImageAllocation create_image(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage);
     size_t pad_uniform_buffer_size(size_t originalSize);
 
     bool init_vulkan();
@@ -116,6 +117,11 @@ private:
     VkFormat swapchainImageFormat;
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
+
+    VkSampleCountFlagBits msaaLevel;
+
+    ImageAllocation colorImage;
+    VkImageView colorImageView;
 
     ImageAllocation depthImage;
     VkImageView depthImageView;
