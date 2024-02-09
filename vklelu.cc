@@ -3,11 +3,12 @@
 #include "utils.hh"
 
 #include "glm/glm.hpp"
-#include "glm/gtx/transform.hpp"
+#include "glm/gtc/matrix_transform.hpp"
 #include "SDL.h"
 #include "SDL_vulkan.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+#define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 #include "VkBootstrap.h"
 #include "vulkan/vulkan.h"
