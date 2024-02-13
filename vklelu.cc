@@ -271,7 +271,7 @@ void VKlelu::set_runtime_dirs()
     wdIsBuildDir = wd_is_builddir();
 
     char *ass = getenv("VKLELU_ASSETDIR");
-    assetDir = ass ? ass : wdIsBuildDir ? ".." : ".";
+    assetDir = ass ? ass : wdIsBuildDir ? "../assets" : "./assets";
     assetDir.push_back('/');
     fprintf(stderr, "Asset directory: %s\n", assetDir.c_str());
 
@@ -298,21 +298,13 @@ void VKlelu::init_scene()
     load_meshes();
     load_images();
 
-    Himmeli kapina;
-    kapina.mesh = get_mesh("kapina");
-    kapina.material = get_material("defaultMesh");
-    kapina.scale = glm::mat4{ 1.0f };
-    kapina.rotate = glm::mat4{ 1.0f };
-    kapina.translate = glm::mat4{ 1.0f };
-    himmelit.push_back(kapina);
-
-    Himmeli triangle;
-    triangle.mesh = get_mesh("triangle");
-    triangle.material = get_material("defaultMesh");
-    triangle.scale = glm::scale(glm::mat4{ 1.0f }, glm::vec3{ 0.2f, 0.2f, 0.2f });
-    triangle.rotate = glm::mat4{ 1.0f };
-    triangle.translate = glm::translate(glm::mat4{ 1.0f }, glm::vec3(-5.0f, 0.0f, -5.0f));
-    himmelit.push_back(triangle);
+    Himmeli monkey;
+    monkey.mesh = get_mesh("monkey");
+    monkey.material = get_material("defaultMesh");
+    monkey.scale = glm::mat4{ 1.0f };
+    monkey.rotate = glm::mat4{ 1.0f };
+    monkey.translate = glm::mat4{ 1.0f };
+    himmelit.push_back(monkey);
 
     VkSamplerCreateInfo samplerInfo = sampler_create_info(VK_FILTER_NEAREST);
     VK_CHECK(vkCreateSampler(device, &samplerInfo, nullptr, &nearestSampler));
@@ -330,7 +322,7 @@ void VKlelu::init_scene()
 
     VkDescriptorImageInfo imageInfo = {};
     imageInfo.sampler = nearestSampler;
-    imageInfo.imageView = textures["kapina_diffuse"].imageView;
+    imageInfo.imageView = textures["monkey_diffuse"].imageView;
     imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
     VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, defaultMat->textureSet, &imageInfo, 0);
@@ -343,23 +335,11 @@ void VKlelu::init_scene()
 
 void VKlelu::load_meshes()
 {
-    Mesh triangleMesh;
-    triangleMesh.vertices.resize(3);
-    triangleMesh.vertices[0].position = { 1.0f, 1.0f, 0.0f };
-    triangleMesh.vertices[1].position = { -1.0f, 1.0f, 0.0f };
-    triangleMesh.vertices[2].position = { 0.0f, -1.0f, 0.0f };
-    triangleMesh.vertices[0].color = { 1.0f, 0.0f, 0.0f };
-    triangleMesh.vertices[1].color = { 0.0f, 1.0f, 0.0f };
-    triangleMesh.vertices[2].color = { 0.0f, 0.0f, 1.0f };
-    upload_mesh(triangleMesh);
-    meshes["triangle"] = triangleMesh;
-    resourceJanitor.push_back([=](){ vmaDestroyBuffer(allocator, triangleMesh.vertexBuffer.buffer, triangleMesh.vertexBuffer.allocation); });
-
-    Mesh kapinaMesh;
-    kapinaMesh.load_obj_file("kultainenapina.obj", assetDir.c_str());
-    upload_mesh(kapinaMesh);
-    meshes["kapina"] = kapinaMesh;
-    resourceJanitor.push_back([=](){ vmaDestroyBuffer(allocator, kapinaMesh.vertexBuffer.buffer, kapinaMesh.vertexBuffer.allocation); });
+    Mesh monkeyMesh;
+    monkeyMesh.load_obj_file("suzanne.obj", assetDir.c_str());
+    upload_mesh(monkeyMesh);
+    meshes["monkey"] = monkeyMesh;
+    resourceJanitor.push_back([=](){ vmaDestroyBuffer(allocator, monkeyMesh.vertexBuffer.buffer, monkeyMesh.vertexBuffer.allocation); });
 }
 
 void VKlelu::upload_mesh(Mesh &mesh)
@@ -428,19 +408,19 @@ void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&functi
 
 void VKlelu::load_images()
 {
-    Texture kapina;
+    Texture monkey;
 
-    load_image("kultainenapina.jpg", kapina.image);
+    load_image("suzanne_uv.png", monkey.image);
 
-    VkImageViewCreateInfo viewInfo = imageview_create_info(VK_FORMAT_R8G8B8A8_SRGB, kapina.image.image, VK_IMAGE_ASPECT_COLOR_BIT);
-    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &kapina.imageView));
+    VkImageViewCreateInfo viewInfo = imageview_create_info(VK_FORMAT_R8G8B8A8_SRGB, monkey.image.image, VK_IMAGE_ASPECT_COLOR_BIT);
+    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &monkey.imageView));
 
     resourceJanitor.push_back([=](){
-        vmaDestroyImage(allocator, kapina.image.image, kapina.image.allocation);
-        vkDestroyImageView(device, kapina.imageView, nullptr);
+        vmaDestroyImage(allocator, monkey.image.image, monkey.image.allocation);
+        vkDestroyImageView(device, monkey.imageView, nullptr);
     });
 
-    textures["kapina_diffuse"] = kapina;
+    textures["monkey_diffuse"] = monkey;
 }
 
 bool VKlelu::load_image(const char *path, ImageAllocation &image)

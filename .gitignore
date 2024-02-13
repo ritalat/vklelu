@@ -2,5 +2,6 @@ build*/
 install/
 *.user
 .vs/
+.vscode/
 out/
 CMakeSettings.json
