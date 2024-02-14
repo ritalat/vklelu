@@ -1,5 +1,6 @@
 #include "vklelu.hh"
 
+#include "struct_helpers.hh"
 #include "utils.hh"
 
 #include "glm/glm.hpp"
@@ -116,6 +117,10 @@ int VKlelu::run()
                 case SDL_QUIT:
                     quit = true;
                     break;
+                case SDL_KEYUP:
+                    if (SDL_SCANCODE_ESCAPE == event.key.keysym.scancode)
+                        quit = true;
+                    break;
                 default:
                     break;
             }
@@ -147,7 +152,7 @@ void VKlelu::draw()
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
     VkClearValue clearValue;
-    float flash = abs(sin(frameCount / 120.0f));
+    float flash = abs(sin(SDL_GetTicks() / 1000.0f));
     clearValue.color = { { 0.0f, 0.0f, flash, 1.0f } };
 
     VkClearValue depthClearValue;
@@ -257,7 +262,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
 void VKlelu::update()
 {
     for (Himmeli &himmeli : himmelit) {
-        himmeli.rotate = glm::rotate(glm::mat4{ 1.0f }, glm::radians(frameCount * 0.4f), glm::vec3(0, 1, 0));
+        himmeli.rotate = glm::rotate(glm::mat4{ 1.0f }, glm::radians(SDL_GetTicks() / 20.0f), glm::vec3(0, 1, 0));
     }
 }
 

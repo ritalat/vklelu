@@ -21,10 +21,6 @@ add_subdirectory(external)
 
 find_package(Vulkan REQUIRED COMPONENTS glslc)
 
-set(ASSETS kultainenapina.jpg
-           kultainenapina.mtl
-           kultainenapina.obj)
-
 set(SHADERS shader.frag
             shader.vert)
 
@@ -43,7 +39,8 @@ set(SOURCES main.cc
             utils.cc
             vklelu.cc)
 
-set(HEADERS utils.hh
+set(HEADERS struct_helpers.hh
+            utils.hh
             vklelu.hh)
 
 add_executable(VKlelu ${SOURCES} ${HEADERS})
@@ -75,9 +72,7 @@ target_link_libraries(VKlelu Vulkan::Vulkan
 
 install(TARGETS VKlelu SDL2 RUNTIME DESTINATION ".")
 
-foreach(ASSET ${ASSETS})
-    install(FILES ${CMAKE_SOURCE_DIR}/${ASSET} DESTINATION ".")
-endforeach()
+install(DIRECTORY assets DESTINATION ".")
 
 foreach(SPIRV_BINARY ${SPIRV_BINARIES})
     install(FILES ${CMAKE_BINARY_DIR}/${SPIRV_BINARY} DESTINATION ".")
