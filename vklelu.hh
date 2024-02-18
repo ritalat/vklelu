@@ -68,13 +68,13 @@ private:
     void init_scene();
     void load_meshes();
     void upload_mesh(Mesh &mesh);
-    void immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function);
     void load_images();
     bool load_image(const char *path, ImageAllocation &image);
-    bool load_shader(const char *path, VkShaderModule &module);
     Material *create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name);
     Mesh *get_mesh(const std::string &name);
     Material *get_material(const std::string &name);
+    void immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function);
+    bool load_shader(const char *path, VkShaderModule &module);
     BufferAllocation create_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
     ImageAllocation create_image(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage);
     size_t pad_uniform_buffer_size(size_t originalSize);
@@ -135,11 +135,14 @@ private:
     VkDescriptorSetLayout objectSetLayout;
     VkDescriptorSetLayout singleTextureSetLayout;
 
+    VkPipeline meshPipeline;
+    VkPipelineLayout meshPipelineLayout;
+
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> frameData;
     SceneData sceneParameters;
     BufferAllocation sceneParameterBuffer;
     UploadContext uploadContext;
-    VkSampler nearestSampler;
+    VkSampler linearSampler;
 
     std::deque<std::function<void()>> resourceJanitor;
 };

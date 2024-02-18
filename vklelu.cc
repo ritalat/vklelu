@@ -303,19 +303,17 @@ void VKlelu::init_scene()
     load_meshes();
     load_images();
 
+    create_material(meshPipeline, meshPipelineLayout, "monkey_material");
+
     Himmeli monkey;
     monkey.mesh = get_mesh("monkey");
-    monkey.material = get_material("defaultMesh");
+    monkey.material = get_material("monkey_material");
     monkey.scale = glm::mat4{ 1.0f };
     monkey.rotate = glm::mat4{ 1.0f };
     monkey.translate = glm::mat4{ 1.0f };
     himmelit.push_back(monkey);
 
-    VkSamplerCreateInfo samplerInfo = sampler_create_info(VK_FILTER_NEAREST);
-    VK_CHECK(vkCreateSampler(device, &samplerInfo, nullptr, &nearestSampler));
-    resourceJanitor.push_back([=](){ vkDestroySampler(device, nearestSampler, nullptr); });
-
-    Material *defaultMat = get_material("defaultMesh");
+    Material *monkeyMat = get_material("monkey_material");
 
     VkDescriptorSetAllocateInfo allocInfo = {};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -323,14 +321,18 @@ void VKlelu::init_scene()
     allocInfo.descriptorPool = descriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &singleTextureSetLayout;
-    VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &defaultMat->textureSet));
+    VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &monkeyMat->textureSet));
+
+    VkSamplerCreateInfo samplerInfo = sampler_create_info(VK_FILTER_LINEAR);
+    VK_CHECK(vkCreateSampler(device, &samplerInfo, nullptr, &linearSampler));
+    resourceJanitor.push_back([=](){ vkDestroySampler(device, linearSampler, nullptr); });
 
     VkDescriptorImageInfo imageInfo = {};
-    imageInfo.sampler = nearestSampler;
+    imageInfo.sampler = linearSampler;
     imageInfo.imageView = textures["monkey_diffuse"].imageView;
     imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 
-    VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, defaultMat->textureSet, &imageInfo, 0);
+    VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, monkeyMat->textureSet, &imageInfo, 0);
 
     vkUpdateDescriptorSets(device, 1, &texture, 0, nullptr);
 
@@ -388,27 +390,6 @@ void VKlelu::upload_mesh(Mesh &mesh)
     });
 
     vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
-}
-
-void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function)
-{
-    VkCommandBuffer cmd = uploadContext.commandBuffer;
-    VkCommandBufferBeginInfo cmdBeginInfo = command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
-
-    VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
-
-    function(cmd);
-
-    VK_CHECK(vkEndCommandBuffer(cmd));
-
-    VkSubmitInfo submitInfo = submit_info(&cmd);
-
-    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, uploadContext.uploadFence));
-
-    vkWaitForFences(device, 1, &uploadContext.uploadFence, true, UINT64_MAX);
-    vkResetFences(device, 1, &uploadContext.uploadFence);
-
-    vkResetCommandPool(device, uploadContext.commandPool, 0);
 }
 
 void VKlelu::load_images()
@@ -511,6 +492,52 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
     return true;
 }
 
+Material *VKlelu::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name)
+{
+    Material mat;
+    mat.pipeline = pipeline;
+    mat.pipelineLayout = layout;
+    materials[name] = mat;
+    return &materials[name];
+}
+
+Mesh *VKlelu::get_mesh(const std::string &name)
+{
+    auto it = meshes.find(name);
+    if (it == meshes.end())
+        return nullptr;
+    return &(*it).second;
+}
+
+Material *VKlelu::get_material(const std::string &name)
+{
+    auto it = materials.find(name);
+    if (it == materials.end())
+        return nullptr;
+    return &(*it).second;
+}
+
+void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function)
+{
+    VkCommandBuffer cmd = uploadContext.commandBuffer;
+    VkCommandBufferBeginInfo cmdBeginInfo = command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+
+    VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
+
+    function(cmd);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    VkSubmitInfo submitInfo = submit_info(&cmd);
+
+    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, uploadContext.uploadFence));
+
+    vkWaitForFences(device, 1, &uploadContext.uploadFence, true, UINT64_MAX);
+    vkResetFences(device, 1, &uploadContext.uploadFence);
+
+    vkResetCommandPool(device, uploadContext.commandPool, 0);
+}
+
 bool VKlelu::load_shader(const char *path, VkShaderModule &module)
 {
     std::string fullPath = shaderDir + std::string(path);
@@ -546,31 +573,6 @@ bool VKlelu::load_shader(const char *path, VkShaderModule &module)
     }
 
     return true;
-}
-
-Material *VKlelu::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name)
-{
-    Material mat;
-    mat.pipeline = pipeline;
-    mat.pipelineLayout = layout;
-    materials[name] = mat;
-    return &materials[name];
-}
-
-Mesh *VKlelu::get_mesh(const std::string &name)
-{
-    auto it = meshes.find(name);
-    if (it == meshes.end())
-        return nullptr;
-    return &(*it).second;
-}
-
-Material *VKlelu::get_material(const std::string &name)
-{
-    auto it = materials.find(name);
-    if (it == materials.end())
-        return nullptr;
-    return &(*it).second;
 }
 
 BufferAllocation VKlelu::create_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
@@ -1037,9 +1039,6 @@ bool VKlelu::init_pipelines()
         return false;
     fprintf(stderr, "Vertex shader module shader.vert.spv created successfully\n");
 
-    VkPipeline meshPipeline;
-    VkPipelineLayout meshPipelineLayout;
-
     VkPushConstantRange pushConstant;
     pushConstant.offset = 0;
     pushConstant.size = sizeof(int);
@@ -1088,8 +1087,6 @@ bool VKlelu::init_pipelines()
         fprintf(stderr, "Failed to create graphics pipeline \"mesh\"\n");
         return false;
     }
-
-    create_material(meshPipeline, meshPipelineLayout, "defaultMesh");
 
     fprintf(stderr, "Graphics pipelines initialized successfully\n");
     return true;
