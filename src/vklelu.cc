@@ -273,29 +273,15 @@ FrameData &VKlelu::get_current_frame()
 
 void VKlelu::set_runtime_dirs()
 {
-    wdIsBuildDir = wd_is_builddir();
-
     char *ass = getenv("VKLELU_ASSETDIR");
-    assetDir = ass ? ass : wdIsBuildDir ? "../assets" : "./assets";
+    assetDir = ass ? ass : "./assets";
     assetDir.push_back('/');
     fprintf(stderr, "Asset directory: %s\n", assetDir.c_str());
 
     char *sdr = getenv("VKLELU_SHADERDIR");
-    shaderDir = sdr ? sdr : ".";
+    shaderDir = sdr ? sdr : "./shaders";
     shaderDir.push_back('/');
     fprintf(stderr, "Shader directory: %s\n", shaderDir.c_str());
-}
-
-bool VKlelu::wd_is_builddir()
-{
-    FILE *f = fopen("CMakeCache.txt", "r");
-    if (!f) {
-        return false;
-    } else {
-        fclose(f);
-        fprintf(stderr, "Running from build directory\n");
-        return true;
-    }
 }
 
 void VKlelu::init_scene()

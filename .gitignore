@@ -4,4 +4,5 @@ install/
 .vs/
 .vscode/
 out/
+shaders/
 CMakeSettings.json

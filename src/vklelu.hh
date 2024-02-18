@@ -63,8 +63,6 @@ private:
     FrameData &get_current_frame();
 
     void set_runtime_dirs();
-    bool wd_is_builddir();
-
     void init_scene();
     void load_meshes();
     void upload_mesh(Mesh &mesh);

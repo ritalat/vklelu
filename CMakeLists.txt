@@ -24,31 +24,33 @@ find_package(Vulkan REQUIRED COMPONENTS glslc)
 set(SHADERS shader.frag
             shader.vert)
 
+file(MAKE_DIRECTORY shaders)
+
 foreach(SHADER ${SHADERS})
-    set(GLSLC_OUT "${SHADER}.spv")
+    set(GLSLC_OUT "shaders/${SHADER}.spv")
     add_custom_command(
         OUTPUT ${GLSLC_OUT}
-        COMMAND ${Vulkan_GLSLC_EXECUTABLE} ${CMAKE_SOURCE_DIR}/${SHADER} -o ${GLSLC_OUT}
-        DEPENDS ${SHADER})
+        COMMAND ${Vulkan_GLSLC_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/shaders/${SHADER} -o ${CMAKE_SOURCE_DIR}/${GLSLC_OUT}
+        DEPENDS src/shaders/${SHADER})
     list(APPEND SPIRV_BINARIES ${GLSLC_OUT})
 endforeach()
 
 add_custom_target(Shaders DEPENDS ${SPIRV_BINARIES})
 
-set(SOURCES main.cc
-            utils.cc
-            vklelu.cc)
+set(SOURCES src/main.cc
+            src/utils.cc
+            src/vklelu.cc)
 
-set(HEADERS struct_helpers.hh
-            utils.hh
-            vklelu.hh)
+set(HEADERS src/struct_helpers.hh
+            src/utils.hh
+            src/vklelu.hh)
 
 add_executable(VKlelu ${SOURCES} ${HEADERS})
 
 if(WIN32)
     # This only works with generated VS solutions
-    # When using VS builtin cmake support you must edit launch.vs.json instead
-    set(VSENV "VKLELU_ASSETDIR=${CMAKE_SOURCE_DIR}\nVKLELU_SHADERDIR=${CMAKE_BINARY_DIR}")
+    # When using VS builtin cmake support you must edit CMakeSettings.json instead
+    set(VSENV "VKLELU_ASSETDIR=${CMAKE_SOURCE_DIR}/assets\nVKLELU_SHADERDIR=${CMAKE_SOURCE_DIR}/shaders")
     # Only set the correct subsystem for release builds
     # This way we can easily see console output in debug builds
     set_target_properties(VKlelu PROPERTIES WIN32_EXECUTABLE $<CONFIG:Release>
@@ -72,8 +74,4 @@ target_link_libraries(VKlelu Vulkan::Vulkan
 
 install(TARGETS VKlelu SDL2 RUNTIME DESTINATION ".")
 
-install(DIRECTORY assets DESTINATION ".")
-
-foreach(SPIRV_BINARY ${SPIRV_BINARIES})
-    install(FILES ${CMAKE_BINARY_DIR}/${SPIRV_BINARY} DESTINATION ".")
-endforeach()
+install(DIRECTORY assets shaders DESTINATION ".")
