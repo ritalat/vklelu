@@ -27,11 +27,12 @@ set(SHADERS shader.frag
 file(MAKE_DIRECTORY shaders)
 
 foreach(SHADER ${SHADERS})
-    set(GLSLC_OUT "shaders/${SHADER}.spv")
+    set(SHADER_FILE ${CMAKE_SOURCE_DIR}/src/glsl/${SHADER})
+    set(GLSLC_OUT ${CMAKE_SOURCE_DIR}/shaders/${SHADER}.spv)
     add_custom_command(
         OUTPUT ${GLSLC_OUT}
-        COMMAND ${Vulkan_GLSLC_EXECUTABLE} ${CMAKE_SOURCE_DIR}/src/shaders/${SHADER} -o ${CMAKE_SOURCE_DIR}/${GLSLC_OUT}
-        DEPENDS src/shaders/${SHADER})
+        COMMAND ${Vulkan_GLSLC_EXECUTABLE} ${SHADER_FILE} -o ${GLSLC_OUT}
+        DEPENDS ${SHADER_FILE})
     list(APPEND SPIRV_BINARIES ${GLSLC_OUT})
 endforeach()
 
@@ -45,7 +46,7 @@ set(HEADERS src/struct_helpers.hh
             src/utils.hh
             src/vklelu.hh)
 
-add_executable(VKlelu ${SOURCES} ${HEADERS})
+add_executable(vklelu ${SOURCES} ${HEADERS})
 
 if(WIN32)
     # This only works with generated VS solutions
@@ -53,17 +54,17 @@ if(WIN32)
     set(VSENV "VKLELU_ASSETDIR=${CMAKE_SOURCE_DIR}/assets\nVKLELU_SHADERDIR=${CMAKE_SOURCE_DIR}/shaders")
     # Only set the correct subsystem for release builds
     # This way we can easily see console output in debug builds
-    set_target_properties(VKlelu PROPERTIES WIN32_EXECUTABLE $<CONFIG:Release>
+    set_target_properties(vklelu PROPERTIES WIN32_EXECUTABLE $<CONFIG:Release>
                                             VS_DEBUGGER_ENVIRONMENT "${VSENV}")
 endif()
 
 if(UNIX)
-    target_link_options(VKlelu PUBLIC "-Wl,--enable-new-dtags")
-    set_target_properties(VKlelu PROPERTIES INSTALL_RPATH "\${ORIGIN}")
+    target_link_options(vklelu PUBLIC "-Wl,--enable-new-dtags")
+    set_target_properties(vklelu PROPERTIES INSTALL_RPATH "\${ORIGIN}")
 endif()
 
-add_dependencies(VKlelu Shaders)
-target_link_libraries(VKlelu Vulkan::Vulkan
+add_dependencies(vklelu Shaders)
+target_link_libraries(vklelu Vulkan::Vulkan
                              SDL2::SDL2
                              SDL2::SDL2main
                              glm::glm
@@ -72,6 +73,6 @@ target_link_libraries(VKlelu Vulkan::Vulkan
                              vk-bootstrap::vk-bootstrap
                              VulkanMemoryAllocator)
 
-install(TARGETS VKlelu SDL2 RUNTIME DESTINATION ".")
+install(TARGETS vklelu SDL2 RUNTIME DESTINATION ".")
 
 install(DIRECTORY assets shaders DESTINATION ".")
