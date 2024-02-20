@@ -6,6 +6,7 @@
 #include "vulkan/vulkan.h"
 
 #include <cstdio>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -50,7 +51,7 @@ VertexInputDescription Vertex::get_description()
     return description;
 }
 
-bool Mesh::load_obj_file(const char* filename, const char *baseDir)
+void Mesh::load_obj_file(const char* filename, const char *baseDir)
 {
     std::string objPath(filename);
     if (baseDir)
@@ -68,10 +69,8 @@ bool Mesh::load_obj_file(const char* filename, const char *baseDir)
     if (!warn.empty())
         fprintf(stderr, "TinyObj warn: %s\n", warn.c_str());
 
-    if (!err.empty()) {
-        fprintf(stderr, "TinyObj err: %s\n", err.c_str());
-        return false;
-    }
+    if (!err.empty())
+        throw std::runtime_error("TinyObj err: " + err);
 
     for (tinyobj::shape_t shape : shapes) {
         size_t index_offset = 0;
@@ -105,8 +104,6 @@ bool Mesh::load_obj_file(const char* filename, const char *baseDir)
             index_offset += faceverts;
         }
     }
-
-    return true;
 }
 
 void PipelineBuilder::use_default_ff()

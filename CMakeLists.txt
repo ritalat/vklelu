@@ -43,10 +43,12 @@ add_custom_target(Shaders DEPENDS ${SPIRV_BINARIES})
 
 set(SOURCES src/context.cc
             src/main.cc
+            src/memory.cc
             src/utils.cc
             src/vklelu.cc)
 
 set(HEADERS src/context.hh
+            src/memory.hh
             src/struct_helpers.hh
             src/utils.hh
             src/vklelu.hh)

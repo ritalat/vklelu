@@ -1,6 +1,7 @@
 #include "vklelu.hh"
 
 #include "context.hh"
+#include "memory.hh"
 #include "struct_helpers.hh"
 #include "utils.hh"
 
@@ -10,7 +11,6 @@
 #include "SDL_vulkan.h"
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-#define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 #include "VkBootstrap.h"
 #include "vulkan/vulkan.h"
@@ -112,7 +112,7 @@ int VKlelu::run()
 
 void VKlelu::draw()
 {
-    FrameData currentFrame = get_current_frame();
+    FrameData &currentFrame = get_current_frame();
 
     VK_CHECK(vkWaitForFences(ctx->device, 1, &currentFrame.renderFence, true, NS_IN_SEC));
     VK_CHECK(vkResetFences(ctx->device, 1, &currentFrame.renderFence));
@@ -174,7 +174,7 @@ void VKlelu::draw()
 
 void VKlelu::draw_objects(VkCommandBuffer cmd)
 {
-    FrameData currentFrame = get_current_frame();
+    FrameData &currentFrame = get_current_frame();
 
     glm::vec3 camera = { 0.0f, 0.0f, -5.0f };
     sceneParameters.cameraPos = glm::vec4{ camera, 1.0f };
@@ -187,25 +187,19 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
     cam.view = view;
     cam.viewproj = projection * view;
 
-    void *camData;
-    vmaMapMemory(ctx->allocator, currentFrame.cameraBuffer.allocation, &camData);
+    void *camData = currentFrame.cameraBufferMapping;
     memcpy(camData, &cam, sizeof(cam));
-    vmaUnmapMemory(ctx->allocator, currentFrame.cameraBuffer.allocation);
 
-    char *sceneData;
-    vmaMapMemory(ctx->allocator, sceneParameterBuffer.allocation, (void**)&sceneData);
+    char *sceneData = (char *)sceneParameterBufferMapping;
     int frameIndex = frameCount % MAX_FRAMES_IN_FLIGHT;
     sceneData += pad_uniform_buffer_size(sizeof(SceneData)) * frameIndex;
     memcpy(sceneData, &sceneParameters, sizeof(SceneData));
-    vmaUnmapMemory(ctx->allocator, sceneParameterBuffer.allocation);
 
-    void *objData;
-    vmaMapMemory(ctx->allocator, currentFrame.objectBuffer.allocation, &objData);
+    void *objData = currentFrame.objectBufferMapping;;
     ObjectData *objectSSBO = (ObjectData *)objData;
     for (int i = 0; i < himmelit.size(); ++i) {
         objectSSBO[i].model = himmelit[i].translate * himmelit[i].rotate * himmelit[i].scale;
     }
-    vmaUnmapMemory(ctx->allocator, currentFrame.objectBuffer.allocation);
 
     Mesh *lastMesh = nullptr;
     Material *lastMaterial = nullptr;
@@ -231,7 +225,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
 
         if (himmeli.mesh != lastMesh) {
             VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cmd, 0, 1, &himmeli.mesh->vertexBuffer.buffer, &offset);
+            vkCmdBindVertexBuffers(cmd, 0, 1, &himmeli.mesh->vertexBuffer->buffer, &offset);
             lastMesh = himmeli.mesh;
         }
         vkCmdDraw(cmd, himmeli.mesh->vertices.size(), 1, 0, 0);
@@ -335,71 +329,38 @@ void VKlelu::load_meshes()
     Mesh monkeyMesh;
     monkeyMesh.load_obj_file("suzanne.obj", assetDir.c_str());
     upload_mesh(monkeyMesh);
-    meshes["monkey"] = monkeyMesh;
-    resourceJanitor.push_back([=](){ vmaDestroyBuffer(ctx->allocator, monkeyMesh.vertexBuffer.buffer, monkeyMesh.vertexBuffer.allocation); });
+    meshes["monkey"] = std::move(monkeyMesh);
 }
 
 void VKlelu::upload_mesh(Mesh &mesh)
 {
     size_t bufferSize = mesh.vertices.size() * sizeof(Vertex);
 
-    VkBufferCreateInfo stagingBufferInfo = {};
-    stagingBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingBufferInfo.pNext = nullptr;
-    stagingBufferInfo.size = bufferSize;
-    stagingBufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    BufferAllocation stagingBuffer(ctx->allocator, bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
-    VmaAllocationCreateInfo vmaAllocInfo = {};
-    vmaAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-
-    BufferAllocation stagingBuffer;
-
-    VK_CHECK(vmaCreateBuffer(ctx->allocator, &stagingBufferInfo, &vmaAllocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
-
-    void *data;
-    vmaMapMemory(ctx->allocator, stagingBuffer.allocation, &data);
+    void *data = stagingBuffer.map();
     memcpy(data, mesh.vertices.data(), bufferSize);
-    vmaUnmapMemory(ctx->allocator, stagingBuffer.allocation);
 
-    VkBufferCreateInfo vertexBufferInfo = {};
-    vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vertexBufferInfo.pNext = nullptr;
-    vertexBufferInfo.size = bufferSize;
-    vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    mesh.vertexBuffer = std::make_unique<BufferAllocation>(ctx->allocator, bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
-    vmaAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    VK_CHECK(vmaCreateBuffer(ctx->allocator, &vertexBufferInfo, &vmaAllocInfo, &mesh.vertexBuffer.buffer, &mesh.vertexBuffer.allocation, nullptr));
-
-    immediate_submit([=](VkCommandBuffer cmd) {
+    immediate_submit([&](VkCommandBuffer cmd) {
         VkBufferCopy copy;
         copy.dstOffset = 0;
         copy.srcOffset = 0;
         copy.size = bufferSize;
-        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, mesh.vertexBuffer.buffer, 1, &copy);
+        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, mesh.vertexBuffer->buffer, 1, &copy);
     });
-
-    vmaDestroyBuffer(ctx->allocator, stagingBuffer.buffer, stagingBuffer.allocation);
 }
 
 void VKlelu::load_images()
 {
     Texture monkey;
-
-    load_image("suzanne_uv.png", monkey.image);
-
-    VkImageViewCreateInfo viewInfo = imageview_create_info(VK_FORMAT_R8G8B8A8_SRGB, monkey.image.image, VK_IMAGE_ASPECT_COLOR_BIT);
-    VK_CHECK(vkCreateImageView(ctx->device, &viewInfo, nullptr, &monkey.imageView));
-
-    resourceJanitor.push_back([=](){
-        vmaDestroyImage(ctx->allocator, monkey.image.image, monkey.image.allocation);
-        vkDestroyImageView(ctx->device, monkey.imageView, nullptr);
-    });
-
-    textures["monkey_diffuse"] = monkey;
+    upload_image("suzanne_uv.png", monkey);
+    monkey.imageView = monkey.image->create_image_view(ctx->device, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+    textures["monkey_diffuse"] = std::move(monkey);
 }
 
-bool VKlelu::load_image(const char *path, ImageAllocation &image)
+void VKlelu::upload_image(const char *path, Texture &texture)
 {
     int width;
     int height;
@@ -410,20 +371,17 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
     stbi_uc *pixels = stbi_load(fullPath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
 
     if (!pixels) {
-        fprintf(stderr, "Failed to load image: %s\n", path);
-        return false;
+        throw std::runtime_error("Failed to load image: " + std::string(path));
     }
 
     void *pixelPtr = pixels;
     VkDeviceSize imageSize = width * height * 4;
     VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
-    BufferAllocation stagingBuffer = create_buffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    BufferAllocation stagingBuffer(ctx->allocator, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
-    void *data;
-    vmaMapMemory(ctx->allocator, stagingBuffer.allocation, &data);
+    void *data = stagingBuffer.map();
     memcpy(data, pixelPtr, imageSize);
-    vmaUnmapMemory(ctx->allocator, stagingBuffer.allocation);
 
     stbi_image_free(pixels);
 
@@ -432,7 +390,7 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
     imageExtent.height = height;
     imageExtent.depth = 1;
 
-    ImageAllocation newImage = create_image(imageExtent, imageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    texture.image = std::make_unique<ImageAllocation>(ctx->allocator, imageExtent, imageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
     immediate_submit([&](VkCommandBuffer cmd) {
         VkImageSubresourceRange range;
@@ -447,7 +405,7 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
         barrier.pNext = nullptr;
         barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.image = newImage.image;
+        barrier.image = texture.image->image;
         barrier.subresourceRange = range;
         barrier.srcAccessMask = 0;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -464,7 +422,7 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
         copyRegion.imageSubresource.layerCount = 1;
         copyRegion.imageExtent = imageExtent;
 
-        vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, newImage.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+        vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, texture.image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
         VkImageMemoryBarrier barrier2 = barrier;
         barrier2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -474,12 +432,6 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
 
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier2);
     });
-
-    vmaDestroyBuffer(ctx->allocator, stagingBuffer.buffer, stagingBuffer.allocation);
-
-    image = newImage;
-
-    return true;
 }
 
 void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function)
@@ -503,14 +455,13 @@ void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&functi
     vkResetCommandPool(ctx->device, uploadContext.commandPool, 0);
 }
 
-bool VKlelu::load_shader(const char *path, VkShaderModule &module)
+void VKlelu::load_shader(const char *path, VkShaderModule &module)
 {
     std::string fullPath = shaderDir + std::string(path);
 
     FILE *f = fopen(fullPath.c_str(), "rb");
     if (!f) {
-        fprintf(stderr, "Failed to open file: %s\n", path);
-        return false;
+        throw std::runtime_error("Failed to open file: " + std::string(path));
     }
 
     fseek(f, 0, SEEK_END);
@@ -522,8 +473,7 @@ bool VKlelu::load_shader(const char *path, VkShaderModule &module)
     fclose(f);
 
     if ((ret * sizeof(uint32_t)) != fileSize) {
-        fprintf(stderr, "Failed to read file: %s\n", path);
-        return false;
+        throw std::runtime_error("Failed to read file: " + std::string(path));
     }
 
     VkShaderModuleCreateInfo createInfo = {};
@@ -533,41 +483,8 @@ bool VKlelu::load_shader(const char *path, VkShaderModule &module)
     createInfo.pCode = &spv_data[0];
 
     if (vkCreateShaderModule(ctx->device, &createInfo, nullptr, &module) != VK_SUCCESS) {
-        fprintf(stderr, "Failed to create shader module: %s\n", path);
-        return false;
+        throw std::runtime_error("Failed to create shader module: " + std::string(path));
     }
-
-    return true;
-}
-
-BufferAllocation VKlelu::create_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
-{
-    VkBufferCreateInfo bufferInfo = {};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.pNext = nullptr;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
-
-    VmaAllocationCreateInfo allocInfo = {};
-    allocInfo.usage = memoryUsage;
-
-    BufferAllocation buffer;
-    VK_CHECK(vmaCreateBuffer(ctx->allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, nullptr));
-    return buffer;
-}
-
-ImageAllocation VKlelu::create_image(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage)
-{
-    VkImageCreateInfo imgInfo = image_create_info(format, usage, extent);
-    imgInfo.samples = samples;
-
-    VmaAllocationCreateInfo imgAllocInfo = {};
-    imgAllocInfo.usage = memoryUsage;
-    imgAllocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
-
-    ImageAllocation image;
-    vmaCreateImage(ctx->allocator, &imgInfo, &imgAllocInfo, &image.image, &image.allocation, nullptr);
-    return image;
 }
 
 size_t VKlelu::pad_uniform_buffer_size(size_t originalSize)
@@ -633,15 +550,8 @@ bool VKlelu::init_swapchain()
     };
     depthImageFormat = VK_FORMAT_D32_SFLOAT;
 
-    depthImage = create_image(imageExtent, depthImageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-
-    VkImageViewCreateInfo depthViewInfo = imageview_create_info(depthImageFormat, depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
-    VK_CHECK(vkCreateImageView(ctx->device, &depthViewInfo, nullptr, &depthImageView));
-
-    resourceJanitor.push_back([=](){
-        vmaDestroyImage(ctx->allocator, depthImage.image, depthImage.allocation);
-        vkDestroyImageView(ctx->device, depthImageView, nullptr);
-    });
+    depthImage.image = std::make_unique<ImageAllocation>(ctx->allocator, imageExtent, depthImageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    depthImage.imageView = depthImage.image->create_image_view(ctx->device, depthImageFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 
     fprintf(stderr, "Swapchain initialized successfully\n");
     return true;
@@ -752,7 +662,7 @@ bool VKlelu::init_framebuffers()
     framebuffers = std::vector<VkFramebuffer>(swapchainImageCount);
 
     for (int i = 0; i < swapchainImageCount; ++i) {
-        VkImageView attachments[2] = { swapchainImageViews[i], depthImageView };
+        VkImageView attachments[2] = { swapchainImageViews[i], depthImage.imageView };
         fbInfo.attachmentCount = 2;
         fbInfo.pAttachments = &attachments[0];
         VK_CHECK(vkCreateFramebuffer(ctx->device, &fbInfo, nullptr, &framebuffers[i]));
@@ -795,9 +705,8 @@ bool VKlelu::init_sync_structures()
 bool VKlelu::init_descriptors()
 {
     size_t sceneParamBufferSize = MAX_FRAMES_IN_FLIGHT * pad_uniform_buffer_size(sizeof(SceneData));
-    sceneParameterBuffer = create_buffer(sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-
-    resourceJanitor.push_back([=](){ vmaDestroyBuffer(ctx->allocator, sceneParameterBuffer.buffer, sceneParameterBuffer.allocation); });
+    sceneParameterBuffer = std::make_unique<BufferAllocation>(ctx->allocator, sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    sceneParameterBufferMapping = sceneParameterBuffer->map();
 
     VkDescriptorSetLayoutBinding camBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
     VkDescriptorSetLayoutBinding sceneBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 1);
@@ -858,13 +767,10 @@ bool VKlelu::init_descriptors()
     resourceJanitor.push_back([=](){ vkDestroyDescriptorPool(ctx->device, descriptorPool, nullptr); });
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        frameData[i].cameraBuffer = create_buffer(sizeof(CameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-        frameData[i].objectBuffer = create_buffer(sizeof(ObjectData) * MAX_OBJECTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
-
-        resourceJanitor.push_back([=](){
-            vmaDestroyBuffer(ctx->allocator, frameData[i].cameraBuffer.buffer, frameData[i].cameraBuffer.allocation);
-            vmaDestroyBuffer(ctx->allocator, frameData[i].objectBuffer.buffer, frameData[i].objectBuffer.allocation);
-        });
+        frameData[i].cameraBuffer = std::make_unique<BufferAllocation>(ctx->allocator, sizeof(CameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        frameData[i].cameraBufferMapping = frameData[i].cameraBuffer->map();
+        frameData[i].objectBuffer = std::make_unique<BufferAllocation>(ctx->allocator, sizeof(ObjectData) * MAX_OBJECTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        frameData[i].objectBufferMapping = frameData[i].objectBuffer->map();
 
         VkDescriptorSetAllocateInfo allocInfo = {};
         allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -883,17 +789,17 @@ bool VKlelu::init_descriptors()
         VK_CHECK(vkAllocateDescriptorSets(ctx->device, &objAllocInfo, &frameData[i].objectDescriptor));
 
         VkDescriptorBufferInfo camInfo = {};
-        camInfo.buffer = frameData[i].cameraBuffer.buffer;
+        camInfo.buffer = frameData[i].cameraBuffer->buffer;
         camInfo.offset = 0;
         camInfo.range = sizeof(CameraData);
 
         VkDescriptorBufferInfo sceneInfo = {};
-        sceneInfo.buffer = sceneParameterBuffer.buffer;
+        sceneInfo.buffer = sceneParameterBuffer->buffer;
         sceneInfo.offset = 0;
         sceneInfo.range = sizeof(SceneData);
 
         VkDescriptorBufferInfo objInfo = {};
-        objInfo.buffer = frameData[i].objectBuffer.buffer;
+        objInfo.buffer = frameData[i].objectBuffer->buffer;
         objInfo.offset = 0;
         objInfo.range = sizeof(ObjectData) * MAX_OBJECTS;
 
@@ -911,13 +817,11 @@ bool VKlelu::init_descriptors()
 bool VKlelu::init_pipelines()
 {
     VkShaderModule fragShader;
-    if (!load_shader("shader.frag.spv", fragShader))
-        return false;
+    load_shader("shader.frag.spv", fragShader);
     fprintf(stderr, "Fragment shader module shader.frag.spv created successfully\n");
 
     VkShaderModule vertShader;
-    if (!load_shader("shader.vert.spv", vertShader))
-        return false;
+    load_shader("shader.vert.spv", vertShader);
     fprintf(stderr, "Vertex shader module shader.vert.spv created successfully\n");
 
     VkPushConstantRange pushConstant;

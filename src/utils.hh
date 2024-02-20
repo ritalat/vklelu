@@ -1,9 +1,12 @@
 #pragma once
 
+#include "memory.hh"
+
 #include "glm/glm.hpp"
 #include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"
 
+#include <memory>
 #include <vector>
 
 #define NS_IN_SEC 1000000000
@@ -20,18 +23,6 @@
             abort();                                                                               \
         }                                                                                          \
     } while (0)
-
-struct ImageAllocation
-{
-    VkImage image;
-    VmaAllocation allocation;
-};
-
-struct BufferAllocation
-{
-    VkBuffer buffer;
-    VmaAllocation allocation;
-};
 
 struct VertexInputDescription
 {
@@ -51,9 +42,9 @@ struct Vertex
 
 struct Mesh
 {
-    bool load_obj_file(const char *filename, const char *baseDir = nullptr);
+    void load_obj_file(const char *filename, const char *baseDir = nullptr);
     std::vector<Vertex> vertices;
-    BufferAllocation vertexBuffer;
+    std::unique_ptr<BufferAllocation> vertexBuffer;
 };
 
 struct Material
@@ -64,7 +55,7 @@ struct Material
 };
 
 struct Texture {
-    ImageAllocation image;
+    std::unique_ptr<ImageAllocation> image;
     VkImageView imageView;
 };
 

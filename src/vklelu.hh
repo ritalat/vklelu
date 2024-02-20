@@ -1,6 +1,7 @@
 #pragma once
 
 #include "context.hh"
+#include "memory.hh"
 #include "utils.hh"
 
 #include "SDL.h"
@@ -22,8 +23,10 @@ struct FrameData {
     VkSemaphore imageAcquiredSemaphore;
     VkSemaphore renderSemaphore;
     VkFence renderFence;
-    BufferAllocation cameraBuffer;
-    BufferAllocation objectBuffer;
+    std::unique_ptr<BufferAllocation> cameraBuffer;
+    void *cameraBufferMapping;
+    std::unique_ptr<BufferAllocation> objectBuffer;
+    void *objectBufferMapping;
     VkDescriptorSet globalDescriptor;
     VkDescriptorSet objectDescriptor;
 };
@@ -71,11 +74,9 @@ private:
     void load_meshes();
     void upload_mesh(Mesh &mesh);
     void load_images();
-    bool load_image(const char *path, ImageAllocation &image);
+    void upload_image(const char *path, Texture &texture);
     void immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function);
-    bool load_shader(const char *path, VkShaderModule &module);
-    BufferAllocation create_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
-    ImageAllocation create_image(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage);
+    void load_shader(const char *path, VkShaderModule &module);
     size_t pad_uniform_buffer_size(size_t originalSize);
 
     bool init_vulkan();
@@ -102,8 +103,7 @@ private:
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
 
-    ImageAllocation depthImage;
-    VkImageView depthImageView;
+    Texture depthImage;
     VkFormat depthImageFormat;
 
     VkRenderPass renderPass;
@@ -119,7 +119,8 @@ private:
 
     std::array<FrameData, MAX_FRAMES_IN_FLIGHT> frameData;
     SceneData sceneParameters;
-    BufferAllocation sceneParameterBuffer;
+    std::unique_ptr<BufferAllocation> sceneParameterBuffer;
+    void *sceneParameterBufferMapping;
     UploadContext uploadContext;
     VkSampler linearSampler;
 
