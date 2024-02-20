@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug" CACHE STRING "..." FORCE)
 endif()
@@ -38,11 +41,13 @@ endforeach()
 
 add_custom_target(Shaders DEPENDS ${SPIRV_BINARIES})
 
-set(SOURCES src/main.cc
+set(SOURCES src/context.cc
+            src/main.cc
             src/utils.cc
             src/vklelu.cc)
 
-set(HEADERS src/struct_helpers.hh
+set(HEADERS src/context.hh
+            src/struct_helpers.hh
             src/utils.hh
             src/vklelu.hh)
 

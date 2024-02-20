@@ -1,5 +1,6 @@
 #include "vklelu.hh"
 
+#include "context.hh"
 #include "struct_helpers.hh"
 #include "utils.hh"
 
@@ -19,8 +20,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <deque>
 #include <functional>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -28,24 +30,17 @@
 #define WINDOW_WIDTH 1024
 #define WINDOW_HEIGHT 768
 
-#define REQUIRED_VK_VERSION_MINOR 3
-
 #define MAX_OBJECTS 10000
 
 VKlelu::VKlelu(int argc, char *argv[]):
     frameCount(0),
-    window(nullptr),
-    instance(nullptr),
-    surface(nullptr),
-    device(nullptr),
-    allocator(nullptr)
+    window(nullptr)
 {
     (void)argc;
     (void)argv;
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
-        fprintf(stderr, "Failed to init SDL\n");
-        return;
+        throw std::runtime_error("Failed to init SDL");
     }
 
     window = SDL_CreateWindow("VKlelu",
@@ -54,8 +49,7 @@ VKlelu::VKlelu(int argc, char *argv[]):
                               WINDOW_WIDTH, WINDOW_HEIGHT,
                               SDL_WINDOW_VULKAN);
     if (!window) {
-        fprintf(stderr, "Failed to create SDL window\n");
-        return;
+        throw std::runtime_error("Failed to create SDL window");
     }
 
     int drawableWidth;
@@ -72,25 +66,11 @@ VKlelu::VKlelu(int argc, char *argv[]):
 
 VKlelu::~VKlelu()
 {
-    vkDeviceWaitIdle(device);
+    if (ctx)
+        vkDeviceWaitIdle(ctx->device);
 
-    for (auto destroyfn : resourceJanitor) {
+    for (auto destroyfn : resourceJanitor)
         destroyfn();
-    }
-
-    if (allocator)
-        vmaDestroyAllocator(allocator);
-
-    if (device)
-        vkDestroyDevice(device, nullptr);
-
-    if (surface)
-        vkDestroySurfaceKHR(instance, surface, nullptr);
-
-    if (instance) {
-        vkb::destroy_debug_utils_messenger(instance, debugMessenger);
-        vkDestroyInstance(instance, nullptr);
-    }
 
     if (window)
         SDL_DestroyWindow(window);
@@ -100,9 +80,6 @@ VKlelu::~VKlelu()
 
 int VKlelu::run()
 {
-    if (!window)
-        return EXIT_FAILURE;
-
     if (!init_vulkan())
         return EXIT_FAILURE;
 
@@ -137,11 +114,11 @@ void VKlelu::draw()
 {
     FrameData currentFrame = get_current_frame();
 
-    VK_CHECK(vkWaitForFences(device, 1, &currentFrame.renderFence, true, NS_IN_SEC));
-    VK_CHECK(vkResetFences(device, 1, &currentFrame.renderFence));
+    VK_CHECK(vkWaitForFences(ctx->device, 1, &currentFrame.renderFence, true, NS_IN_SEC));
+    VK_CHECK(vkResetFences(ctx->device, 1, &currentFrame.renderFence));
 
     uint32_t swapchainImageIndex;
-    VK_CHECK(vkAcquireNextImageKHR(device, swapchain, NS_IN_SEC, currentFrame.imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
+    VK_CHECK(vkAcquireNextImageKHR(ctx->device, swapchain, NS_IN_SEC, currentFrame.imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
 
     VK_CHECK(vkResetCommandBuffer(currentFrame.mainCommandBuffer, 0));
 
@@ -166,7 +143,7 @@ void VKlelu::draw()
 
     vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-    draw_objects(cmd, himmelit.data(), himmelit.size());
+    draw_objects(cmd);
 
     vkCmdEndRenderPass(cmd);
 
@@ -181,7 +158,7 @@ void VKlelu::draw()
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &currentFrame.renderSemaphore;
 
-    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submit, currentFrame.renderFence));
+    VK_CHECK(vkQueueSubmit(ctx->graphicsQueue, 1, &submit, currentFrame.renderFence));
 
     VkPresentInfoKHR presentInfo = present_info();
     presentInfo.swapchainCount = 1;
@@ -190,12 +167,12 @@ void VKlelu::draw()
     presentInfo.pWaitSemaphores = &currentFrame.renderSemaphore;
     presentInfo.pImageIndices = &swapchainImageIndex;
 
-    VK_CHECK(vkQueuePresentKHR(graphicsQueue, &presentInfo));
+    VK_CHECK(vkQueuePresentKHR(ctx->graphicsQueue, &presentInfo));
 
     ++frameCount;
 }
 
-void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
+void VKlelu::draw_objects(VkCommandBuffer cmd)
 {
     FrameData currentFrame = get_current_frame();
 
@@ -211,31 +188,33 @@ void VKlelu::draw_objects(VkCommandBuffer cmd, Himmeli *first, int count)
     cam.viewproj = projection * view;
 
     void *camData;
-    vmaMapMemory(allocator, currentFrame.cameraBuffer.allocation, &camData);
+    vmaMapMemory(ctx->allocator, currentFrame.cameraBuffer.allocation, &camData);
     memcpy(camData, &cam, sizeof(cam));
-    vmaUnmapMemory(allocator, currentFrame.cameraBuffer.allocation);
+    vmaUnmapMemory(ctx->allocator, currentFrame.cameraBuffer.allocation);
 
     char *sceneData;
-    vmaMapMemory(allocator, sceneParameterBuffer.allocation, (void**)&sceneData);
+    vmaMapMemory(ctx->allocator, sceneParameterBuffer.allocation, (void**)&sceneData);
     int frameIndex = frameCount % MAX_FRAMES_IN_FLIGHT;
     sceneData += pad_uniform_buffer_size(sizeof(SceneData)) * frameIndex;
     memcpy(sceneData, &sceneParameters, sizeof(SceneData));
-    vmaUnmapMemory(allocator, sceneParameterBuffer.allocation);
+    vmaUnmapMemory(ctx->allocator, sceneParameterBuffer.allocation);
 
     void *objData;
-    vmaMapMemory(allocator, currentFrame.objectBuffer.allocation, &objData);
-    ObjectData * objectSSBO = (ObjectData *)objData;
-    for (int i = 0; i < count; ++i) {
-        Himmeli &himmeli = first[i];
-        objectSSBO[i].model = himmeli.translate * himmeli.rotate * himmeli.scale;
+    vmaMapMemory(ctx->allocator, currentFrame.objectBuffer.allocation, &objData);
+    ObjectData *objectSSBO = (ObjectData *)objData;
+    for (int i = 0; i < himmelit.size(); ++i) {
+        objectSSBO[i].model = himmelit[i].translate * himmelit[i].rotate * himmelit[i].scale;
     }
-    vmaUnmapMemory(allocator, currentFrame.objectBuffer.allocation);
+    vmaUnmapMemory(ctx->allocator, currentFrame.objectBuffer.allocation);
 
     Mesh *lastMesh = nullptr;
     Material *lastMaterial = nullptr;
 
-    for (int i = 0; i < count; ++i) {
-        Himmeli &himmeli = first[i];
+    for (int i = 0; i < himmelit.size(); ++i) {
+        Himmeli &himmeli = himmelit[i];
+        if (!himmeli.material || !himmeli.mesh)
+            continue;
+
         if (himmeli.material != lastMaterial) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipeline);
             lastMaterial = himmeli.material;
@@ -307,11 +286,11 @@ void VKlelu::init_scene()
     allocInfo.descriptorPool = descriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &singleTextureSetLayout;
-    VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &monkeyMat->textureSet));
+    VK_CHECK(vkAllocateDescriptorSets(ctx->device, &allocInfo, &monkeyMat->textureSet));
 
     VkSamplerCreateInfo samplerInfo = sampler_create_info(VK_FILTER_LINEAR);
-    VK_CHECK(vkCreateSampler(device, &samplerInfo, nullptr, &linearSampler));
-    resourceJanitor.push_back([=](){ vkDestroySampler(device, linearSampler, nullptr); });
+    VK_CHECK(vkCreateSampler(ctx->device, &samplerInfo, nullptr, &linearSampler));
+    resourceJanitor.push_back([=](){ vkDestroySampler(ctx->device, linearSampler, nullptr); });
 
     VkDescriptorImageInfo imageInfo = {};
     imageInfo.sampler = linearSampler;
@@ -320,10 +299,35 @@ void VKlelu::init_scene()
 
     VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, monkeyMat->textureSet, &imageInfo, 0);
 
-    vkUpdateDescriptorSets(device, 1, &texture, 0, nullptr);
+    vkUpdateDescriptorSets(ctx->device, 1, &texture, 0, nullptr);
 
     sceneParameters.lightPos = { 10.0f, 10.0f, 10.0f, 0.0f };
     sceneParameters.lightColor = { 1.0f, 1.0f, 1.0f, 0.0f };
+}
+
+Material *VKlelu::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name)
+{
+    Material mat;
+    mat.pipeline = pipeline;
+    mat.pipelineLayout = layout;
+    materials[name] = mat;
+    return &materials[name];
+}
+
+Mesh *VKlelu::get_mesh(const std::string &name)
+{
+    auto it = meshes.find(name);
+    if (it == meshes.end())
+        return nullptr;
+    return &(*it).second;
+}
+
+Material *VKlelu::get_material(const std::string &name)
+{
+    auto it = materials.find(name);
+    if (it == materials.end())
+        return nullptr;
+    return &(*it).second;
 }
 
 void VKlelu::load_meshes()
@@ -332,7 +336,7 @@ void VKlelu::load_meshes()
     monkeyMesh.load_obj_file("suzanne.obj", assetDir.c_str());
     upload_mesh(monkeyMesh);
     meshes["monkey"] = monkeyMesh;
-    resourceJanitor.push_back([=](){ vmaDestroyBuffer(allocator, monkeyMesh.vertexBuffer.buffer, monkeyMesh.vertexBuffer.allocation); });
+    resourceJanitor.push_back([=](){ vmaDestroyBuffer(ctx->allocator, monkeyMesh.vertexBuffer.buffer, monkeyMesh.vertexBuffer.allocation); });
 }
 
 void VKlelu::upload_mesh(Mesh &mesh)
@@ -350,12 +354,12 @@ void VKlelu::upload_mesh(Mesh &mesh)
 
     BufferAllocation stagingBuffer;
 
-    VK_CHECK(vmaCreateBuffer(allocator, &stagingBufferInfo, &vmaAllocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
+    VK_CHECK(vmaCreateBuffer(ctx->allocator, &stagingBufferInfo, &vmaAllocInfo, &stagingBuffer.buffer, &stagingBuffer.allocation, nullptr));
 
     void *data;
-    vmaMapMemory(allocator, stagingBuffer.allocation, &data);
+    vmaMapMemory(ctx->allocator, stagingBuffer.allocation, &data);
     memcpy(data, mesh.vertices.data(), bufferSize);
-    vmaUnmapMemory(allocator, stagingBuffer.allocation);
+    vmaUnmapMemory(ctx->allocator, stagingBuffer.allocation);
 
     VkBufferCreateInfo vertexBufferInfo = {};
     vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -365,7 +369,7 @@ void VKlelu::upload_mesh(Mesh &mesh)
 
     vmaAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    VK_CHECK(vmaCreateBuffer(allocator, &vertexBufferInfo, &vmaAllocInfo, &mesh.vertexBuffer.buffer, &mesh.vertexBuffer.allocation, nullptr));
+    VK_CHECK(vmaCreateBuffer(ctx->allocator, &vertexBufferInfo, &vmaAllocInfo, &mesh.vertexBuffer.buffer, &mesh.vertexBuffer.allocation, nullptr));
 
     immediate_submit([=](VkCommandBuffer cmd) {
         VkBufferCopy copy;
@@ -375,7 +379,7 @@ void VKlelu::upload_mesh(Mesh &mesh)
         vkCmdCopyBuffer(cmd, stagingBuffer.buffer, mesh.vertexBuffer.buffer, 1, &copy);
     });
 
-    vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+    vmaDestroyBuffer(ctx->allocator, stagingBuffer.buffer, stagingBuffer.allocation);
 }
 
 void VKlelu::load_images()
@@ -385,11 +389,11 @@ void VKlelu::load_images()
     load_image("suzanne_uv.png", monkey.image);
 
     VkImageViewCreateInfo viewInfo = imageview_create_info(VK_FORMAT_R8G8B8A8_SRGB, monkey.image.image, VK_IMAGE_ASPECT_COLOR_BIT);
-    VK_CHECK(vkCreateImageView(device, &viewInfo, nullptr, &monkey.imageView));
+    VK_CHECK(vkCreateImageView(ctx->device, &viewInfo, nullptr, &monkey.imageView));
 
     resourceJanitor.push_back([=](){
-        vmaDestroyImage(allocator, monkey.image.image, monkey.image.allocation);
-        vkDestroyImageView(device, monkey.imageView, nullptr);
+        vmaDestroyImage(ctx->allocator, monkey.image.image, monkey.image.allocation);
+        vkDestroyImageView(ctx->device, monkey.imageView, nullptr);
     });
 
     textures["monkey_diffuse"] = monkey;
@@ -417,9 +421,9 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
     BufferAllocation stagingBuffer = create_buffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
     void *data;
-    vmaMapMemory(allocator, stagingBuffer.allocation, &data);
+    vmaMapMemory(ctx->allocator, stagingBuffer.allocation, &data);
     memcpy(data, pixelPtr, imageSize);
-    vmaUnmapMemory(allocator, stagingBuffer.allocation);
+    vmaUnmapMemory(ctx->allocator, stagingBuffer.allocation);
 
     stbi_image_free(pixels);
 
@@ -471,36 +475,11 @@ bool VKlelu::load_image(const char *path, ImageAllocation &image)
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier2);
     });
 
-    vmaDestroyBuffer(allocator, stagingBuffer.buffer, stagingBuffer.allocation);
+    vmaDestroyBuffer(ctx->allocator, stagingBuffer.buffer, stagingBuffer.allocation);
 
     image = newImage;
 
     return true;
-}
-
-Material *VKlelu::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name)
-{
-    Material mat;
-    mat.pipeline = pipeline;
-    mat.pipelineLayout = layout;
-    materials[name] = mat;
-    return &materials[name];
-}
-
-Mesh *VKlelu::get_mesh(const std::string &name)
-{
-    auto it = meshes.find(name);
-    if (it == meshes.end())
-        return nullptr;
-    return &(*it).second;
-}
-
-Material *VKlelu::get_material(const std::string &name)
-{
-    auto it = materials.find(name);
-    if (it == materials.end())
-        return nullptr;
-    return &(*it).second;
 }
 
 void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function)
@@ -516,12 +495,12 @@ void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&functi
 
     VkSubmitInfo submitInfo = submit_info(&cmd);
 
-    VK_CHECK(vkQueueSubmit(graphicsQueue, 1, &submitInfo, uploadContext.uploadFence));
+    VK_CHECK(vkQueueSubmit(ctx->graphicsQueue, 1, &submitInfo, uploadContext.uploadFence));
 
-    vkWaitForFences(device, 1, &uploadContext.uploadFence, true, UINT64_MAX);
-    vkResetFences(device, 1, &uploadContext.uploadFence);
+    vkWaitForFences(ctx->device, 1, &uploadContext.uploadFence, true, UINT64_MAX);
+    vkResetFences(ctx->device, 1, &uploadContext.uploadFence);
 
-    vkResetCommandPool(device, uploadContext.commandPool, 0);
+    vkResetCommandPool(ctx->device, uploadContext.commandPool, 0);
 }
 
 bool VKlelu::load_shader(const char *path, VkShaderModule &module)
@@ -553,7 +532,7 @@ bool VKlelu::load_shader(const char *path, VkShaderModule &module)
     createInfo.codeSize = spv_data.size() * sizeof(uint32_t);
     createInfo.pCode = &spv_data[0];
 
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &module) != VK_SUCCESS) {
+    if (vkCreateShaderModule(ctx->device, &createInfo, nullptr, &module) != VK_SUCCESS) {
         fprintf(stderr, "Failed to create shader module: %s\n", path);
         return false;
     }
@@ -573,7 +552,7 @@ BufferAllocation VKlelu::create_buffer(size_t size, VkBufferUsageFlags usage, Vm
     allocInfo.usage = memoryUsage;
 
     BufferAllocation buffer;
-    VK_CHECK(vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, nullptr));
+    VK_CHECK(vmaCreateBuffer(ctx->allocator, &bufferInfo, &allocInfo, &buffer.buffer, &buffer.allocation, nullptr));
     return buffer;
 }
 
@@ -587,84 +566,22 @@ ImageAllocation VKlelu::create_image(VkExtent3D extent, VkFormat format, VkSampl
     imgAllocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
     ImageAllocation image;
-    vmaCreateImage(allocator, &imgInfo, &imgAllocInfo, &image.image, &image.allocation, nullptr);
+    vmaCreateImage(ctx->allocator, &imgInfo, &imgAllocInfo, &image.image, &image.allocation, nullptr);
     return image;
 }
 
 size_t VKlelu::pad_uniform_buffer_size(size_t originalSize)
 {
-    size_t minUboAllignment = physicalDeviceProperties.limits.minUniformBufferOffsetAlignment;
+    size_t minUboAllignment = ctx->physicalDeviceProperties.limits.minUniformBufferOffsetAlignment;
     size_t alignedSize = originalSize;
     if (minUboAllignment > 0)
-        alignedSize = (alignedSize + minUboAllignment - 1) & ~(minUboAllignment -1);
+        alignedSize = (alignedSize + minUboAllignment - 1) & ~(minUboAllignment - 1);
     return alignedSize;
 }
 
 bool VKlelu::init_vulkan()
 {
-    vkb::InstanceBuilder builder;
-    auto inst_ret = builder.set_app_name("VKlelu")
-                           .request_validation_layers()
-                           .require_api_version(1, REQUIRED_VK_VERSION_MINOR)
-                           .use_default_debug_messenger()
-                           .build();
-    if (!inst_ret) {
-        fprintf(stderr, "Failed to create Vulkan instance. Error: %s\n", inst_ret.error().message().c_str());
-        return false;
-    }
-    vkb::Instance vkb_inst = inst_ret.value();
-    instance = vkb_inst.instance;
-    debugMessenger = vkb_inst.debug_messenger;
-
-    if (!SDL_Vulkan_CreateSurface(window, instance, &surface)) {
-        fprintf(stderr, "Failed to create Vulkan surface");
-        return false;
-    }
-
-    vkb::PhysicalDeviceSelector selector{ vkb_inst };
-    auto phys_ret = selector.set_surface(surface)
-                            .set_minimum_version(1, REQUIRED_VK_VERSION_MINOR)
-                            .select();
-    if (!phys_ret) {
-        fprintf(stderr, "Failed to select Vulkan physical device. Error: %s\n", phys_ret.error().message().c_str());
-        return false;
-    }
-    vkb::PhysicalDevice vkb_phys = phys_ret.value();
-    physicalDevice = vkb_phys.physical_device;
-    physicalDeviceProperties = vkb_phys.properties;
-
-    msaaLevel = VK_SAMPLE_COUNT_4_BIT;
-
-    VkPhysicalDeviceShaderDrawParametersFeatures shaderParamFeatures = {};
-    shaderParamFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_DRAW_PARAMETERS_FEATURES;
-    shaderParamFeatures.pNext = nullptr;
-    shaderParamFeatures.shaderDrawParameters = VK_TRUE;
-
-    vkb::DeviceBuilder deviceBuilder{ vkb_phys };
-    auto dev_ret = deviceBuilder.add_pNext(&shaderParamFeatures)
-                                .build();
-    if (!dev_ret) {
-        fprintf(stderr, "Failed to create Vulkan device. Error: %s\n", dev_ret.error().message().c_str());
-        return false;
-    }
-    vkb::Device vkb_device = dev_ret.value();
-    device = vkb_device.device;
-
-    auto graphics_queue_ret  = vkb_device.get_queue(vkb::QueueType::graphics);
-    if (!graphics_queue_ret) {
-        fprintf(stderr, "Failed to get graphics queue. Error: %s\n", graphics_queue_ret.error().message().c_str());
-        return false;
-    }
-    graphicsQueue = graphics_queue_ret.value();
-    graphicsQueueFamily = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
-
-    VmaAllocatorCreateInfo allocatorInfo = {};
-    allocatorInfo.instance = instance;
-    allocatorInfo.physicalDevice = physicalDevice;
-    allocatorInfo.device = device;
-    VK_CHECK(vmaCreateAllocator(&allocatorInfo, &allocator));
-
-    fprintf(stderr, "Vulkan 1.%d initialized successfully\n", REQUIRED_VK_VERSION_MINOR);
+    ctx = std::make_unique<VulkanContext>(window);
 
     if (!init_swapchain())
         return false;
@@ -692,7 +609,7 @@ bool VKlelu::init_vulkan()
 
 bool VKlelu::init_swapchain()
 {
-    vkb::SwapchainBuilder swapchainBuilder{physicalDevice, device, surface};
+    vkb::SwapchainBuilder swapchainBuilder{ ctx->physicalDevice, ctx->device, ctx->surface };
     auto swap_ret = swapchainBuilder.use_default_format_selection()
                                     .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
                                     .set_desired_extent(fbSize.width, fbSize.height)
@@ -707,7 +624,7 @@ bool VKlelu::init_swapchain()
     swapchainImages = vkb_swapchain.get_images().value();
     swapchainImageViews = vkb_swapchain.get_image_views().value();
 
-    resourceJanitor.push_back([=](){ vkDestroySwapchainKHR(device, swapchain, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroySwapchainKHR(ctx->device, swapchain, nullptr); });
 
     VkExtent3D imageExtent = {
         fbSize.width,
@@ -716,21 +633,14 @@ bool VKlelu::init_swapchain()
     };
     depthImageFormat = VK_FORMAT_D32_SFLOAT;
 
-    colorImage = create_image(imageExtent, swapchainImageFormat, msaaLevel, VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-
-    VkImageViewCreateInfo imageViewInfo = imageview_create_info(swapchainImageFormat, colorImage.image, VK_IMAGE_ASPECT_COLOR_BIT);
-    VK_CHECK(vkCreateImageView(device, &imageViewInfo, nullptr, &colorImageView));
-
-    depthImage = create_image(imageExtent, depthImageFormat, msaaLevel, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    depthImage = create_image(imageExtent, depthImageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
     VkImageViewCreateInfo depthViewInfo = imageview_create_info(depthImageFormat, depthImage.image, VK_IMAGE_ASPECT_DEPTH_BIT);
-    VK_CHECK(vkCreateImageView(device, &depthViewInfo, nullptr, &depthImageView));
+    VK_CHECK(vkCreateImageView(ctx->device, &depthViewInfo, nullptr, &depthImageView));
 
     resourceJanitor.push_back([=](){
-        vmaDestroyImage(allocator, colorImage.image, colorImage.allocation);
-        vkDestroyImageView(device, colorImageView, nullptr);
-        vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
-        vkDestroyImageView(device, depthImageView, nullptr);
+        vmaDestroyImage(ctx->allocator, depthImage.image, depthImage.allocation);
+        vkDestroyImageView(ctx->device, depthImageView, nullptr);
     });
 
     fprintf(stderr, "Swapchain initialized successfully\n");
@@ -740,22 +650,22 @@ bool VKlelu::init_swapchain()
 bool VKlelu::init_commands()
 {
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        VkCommandPoolCreateInfo commandPoolInfo = command_pool_create_info(graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-        VK_CHECK(vkCreateCommandPool(device, &commandPoolInfo, nullptr, &frameData[i].commandPool));
+        VkCommandPoolCreateInfo commandPoolInfo = command_pool_create_info(ctx->graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+        VK_CHECK(vkCreateCommandPool(ctx->device, &commandPoolInfo, nullptr, &frameData[i].commandPool));
 
         VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(frameData[i].commandPool, 1);
-        VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &frameData[i].mainCommandBuffer));
+        VK_CHECK(vkAllocateCommandBuffers(ctx->device, &cmdAllocInfo, &frameData[i].mainCommandBuffer));
 
-        resourceJanitor.push_back([=](){ vkDestroyCommandPool(device, frameData[i].commandPool, nullptr); });
+        resourceJanitor.push_back([=](){ vkDestroyCommandPool(ctx->device, frameData[i].commandPool, nullptr); });
     }
 
-    VkCommandPoolCreateInfo uploadPoolInfo = command_pool_create_info(graphicsQueueFamily);
-    VK_CHECK(vkCreateCommandPool(device, &uploadPoolInfo, nullptr, &uploadContext.commandPool));
+    VkCommandPoolCreateInfo uploadPoolInfo = command_pool_create_info(ctx->graphicsQueueFamily);
+    VK_CHECK(vkCreateCommandPool(ctx->device, &uploadPoolInfo, nullptr, &uploadContext.commandPool));
 
     VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(uploadContext.commandPool, 1);
-    VK_CHECK(vkAllocateCommandBuffers(device, &cmdAllocInfo, &uploadContext.commandBuffer));
+    VK_CHECK(vkAllocateCommandBuffers(ctx->device, &cmdAllocInfo, &uploadContext.commandBuffer));
 
-    resourceJanitor.push_back([=](){ vkDestroyCommandPool(device, uploadContext.commandPool, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyCommandPool(ctx->device, uploadContext.commandPool, nullptr); });
 
     fprintf(stderr, "Command pool initialized successfully\n");
     return true;
@@ -765,13 +675,13 @@ bool VKlelu::init_default_renderpass()
 {
     VkAttachmentDescription colorAttachment = {};
     colorAttachment.format = swapchainImageFormat;
-    colorAttachment.samples = msaaLevel;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
     VkAttachmentReference colorAttachmentRef = {};
     colorAttachmentRef.attachment = 0;
@@ -780,7 +690,7 @@ bool VKlelu::init_default_renderpass()
     VkAttachmentDescription depthAttachment = {};
     depthAttachment.flags = 0;
     depthAttachment.format = depthImageFormat;
-    depthAttachment.samples = msaaLevel;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -792,26 +702,11 @@ bool VKlelu::init_default_renderpass()
     depthAttachmentRef.attachment = 1;
     depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentDescription colorAttachmentResolve = {};
-    colorAttachmentResolve.format = swapchainImageFormat;
-    colorAttachmentResolve.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachmentResolve.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachmentResolve.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachmentResolve.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachmentResolve.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachmentResolve.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachmentResolve.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-    VkAttachmentReference colorAttachmentResolveRef = {};
-    colorAttachmentResolveRef.attachment = 2;
-    colorAttachmentResolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
     VkSubpassDescription subpass = {};
     subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
     subpass.pDepthStencilAttachment = &depthAttachmentRef;
-    subpass.pResolveAttachments = &colorAttachmentResolveRef;
 
     VkSubpassDependency dependency = {};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -829,21 +724,21 @@ bool VKlelu::init_default_renderpass()
     depthDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
     depthDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
 
-    VkAttachmentDescription attachments[3] = { colorAttachment, depthAttachment, colorAttachmentResolve };
+    VkAttachmentDescription attachments[2] = { colorAttachment, depthAttachment };
     VkSubpassDependency dependencies[2] = { dependency, depthDependency };
 
     VkRenderPassCreateInfo renderPassInfo = {};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = 3;
+    renderPassInfo.attachmentCount = 2;
     renderPassInfo.pAttachments = &attachments[0];
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
     renderPassInfo.dependencyCount = 2;
     renderPassInfo.pDependencies = &dependencies[0];
 
-    VK_CHECK(vkCreateRenderPass(device, &renderPassInfo, nullptr, &renderPass));
+    VK_CHECK(vkCreateRenderPass(ctx->device, &renderPassInfo, nullptr, &renderPass));
 
-    resourceJanitor.push_back([=](){ vkDestroyRenderPass(device, renderPass, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyRenderPass(ctx->device, renderPass, nullptr); });
 
     fprintf(stderr, "Renderpass initialized successfully\n");
     return true;
@@ -857,14 +752,14 @@ bool VKlelu::init_framebuffers()
     framebuffers = std::vector<VkFramebuffer>(swapchainImageCount);
 
     for (int i = 0; i < swapchainImageCount; ++i) {
-        VkImageView attachments[3] = { colorImageView, depthImageView, swapchainImageViews[i] };
-        fbInfo.attachmentCount = 3;
+        VkImageView attachments[2] = { swapchainImageViews[i], depthImageView };
+        fbInfo.attachmentCount = 2;
         fbInfo.pAttachments = &attachments[0];
-        VK_CHECK(vkCreateFramebuffer(device, &fbInfo, nullptr, &framebuffers[i]));
+        VK_CHECK(vkCreateFramebuffer(ctx->device, &fbInfo, nullptr, &framebuffers[i]));
 
         resourceJanitor.push_back([=](){
-            vkDestroyImageView(device, swapchainImageViews[i], nullptr);
-            vkDestroyFramebuffer(device, framebuffers[i], nullptr);
+            vkDestroyImageView(ctx->device, swapchainImageViews[i], nullptr);
+            vkDestroyFramebuffer(ctx->device, framebuffers[i], nullptr);
         });
     }
 
@@ -876,22 +771,22 @@ bool VKlelu::init_sync_structures()
 {
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         VkFenceCreateInfo fenceCreateInfo = fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
-        VK_CHECK(vkCreateFence(device, &fenceCreateInfo, nullptr, &frameData[i].renderFence));
+        VK_CHECK(vkCreateFence(ctx->device, &fenceCreateInfo, nullptr, &frameData[i].renderFence));
 
         VkSemaphoreCreateInfo semaphoreCreateInfo = semaphore_create_info();
-        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frameData[i].imageAcquiredSemaphore));
-        VK_CHECK(vkCreateSemaphore(device, &semaphoreCreateInfo, nullptr, &frameData[i].renderSemaphore));
+        VK_CHECK(vkCreateSemaphore(ctx->device, &semaphoreCreateInfo, nullptr, &frameData[i].imageAcquiredSemaphore));
+        VK_CHECK(vkCreateSemaphore(ctx->device, &semaphoreCreateInfo, nullptr, &frameData[i].renderSemaphore));
 
         resourceJanitor.push_back([=](){
-            vkDestroyFence(device, frameData[i].renderFence, nullptr);
-            vkDestroySemaphore(device, frameData[i].imageAcquiredSemaphore, nullptr);
-            vkDestroySemaphore(device, frameData[i].renderSemaphore, nullptr);
+            vkDestroyFence(ctx->device, frameData[i].renderFence, nullptr);
+            vkDestroySemaphore(ctx->device, frameData[i].imageAcquiredSemaphore, nullptr);
+            vkDestroySemaphore(ctx->device, frameData[i].renderSemaphore, nullptr);
         });
     }
 
     VkFenceCreateInfo uploadFenceInfo = fence_create_info();
-    VK_CHECK(vkCreateFence(device, &uploadFenceInfo, nullptr, &uploadContext.uploadFence));
-    resourceJanitor.push_back([=](){ vkDestroyFence(device, uploadContext.uploadFence, nullptr); });
+    VK_CHECK(vkCreateFence(ctx->device, &uploadFenceInfo, nullptr, &uploadContext.uploadFence));
+    resourceJanitor.push_back([=](){ vkDestroyFence(ctx->device, uploadContext.uploadFence, nullptr); });
 
     fprintf(stderr, "Sync structures initialized successfully\n");
     return true;
@@ -902,7 +797,7 @@ bool VKlelu::init_descriptors()
     size_t sceneParamBufferSize = MAX_FRAMES_IN_FLIGHT * pad_uniform_buffer_size(sizeof(SceneData));
     sceneParameterBuffer = create_buffer(sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
-    resourceJanitor.push_back([=](){ vmaDestroyBuffer(allocator, sceneParameterBuffer.buffer, sceneParameterBuffer.allocation); });
+    resourceJanitor.push_back([=](){ vmaDestroyBuffer(ctx->allocator, sceneParameterBuffer.buffer, sceneParameterBuffer.allocation); });
 
     VkDescriptorSetLayoutBinding camBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
     VkDescriptorSetLayoutBinding sceneBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 1);
@@ -915,9 +810,9 @@ bool VKlelu::init_descriptors()
     setInfo.bindingCount = 2;
     setInfo.pBindings = bindings;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &globalSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(ctx->device, &setInfo, nullptr, &globalSetLayout));
 
-    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(device, globalSetLayout, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device, globalSetLayout, nullptr); });
 
     VkDescriptorSetLayoutBinding objectBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
 
@@ -928,9 +823,9 @@ bool VKlelu::init_descriptors()
     set2Info.bindingCount = 1;
     set2Info.pBindings = &objectBind;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(device, &set2Info, nullptr, &objectSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(ctx->device, &set2Info, nullptr, &objectSetLayout));
 
-    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(device, objectSetLayout, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device, objectSetLayout, nullptr); });
 
     VkDescriptorSetLayoutBinding textureBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0);
 
@@ -941,9 +836,9 @@ bool VKlelu::init_descriptors()
     set3Info.flags = 0;
     set3Info.pBindings = &textureBind;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(device, &set3Info, nullptr, &singleTextureSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(ctx->device, &set3Info, nullptr, &singleTextureSetLayout));
 
-    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(device, singleTextureSetLayout, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device, singleTextureSetLayout, nullptr); });
 
     std::vector<VkDescriptorPoolSize> sizes = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 },
                                                 { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 10 },
@@ -958,17 +853,17 @@ bool VKlelu::init_descriptors()
     poolInfo.poolSizeCount = sizes.size();
     poolInfo.pPoolSizes = sizes.data();
 
-    VK_CHECK(vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool));
+    VK_CHECK(vkCreateDescriptorPool(ctx->device, &poolInfo, nullptr, &descriptorPool));
 
-    resourceJanitor.push_back([=](){ vkDestroyDescriptorPool(device, descriptorPool, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorPool(ctx->device, descriptorPool, nullptr); });
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         frameData[i].cameraBuffer = create_buffer(sizeof(CameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
         frameData[i].objectBuffer = create_buffer(sizeof(ObjectData) * MAX_OBJECTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
 
         resourceJanitor.push_back([=](){
-            vmaDestroyBuffer(allocator, frameData[i].cameraBuffer.buffer, frameData[i].cameraBuffer.allocation);
-            vmaDestroyBuffer(allocator, frameData[i].objectBuffer.buffer, frameData[i].objectBuffer.allocation);
+            vmaDestroyBuffer(ctx->allocator, frameData[i].cameraBuffer.buffer, frameData[i].cameraBuffer.allocation);
+            vmaDestroyBuffer(ctx->allocator, frameData[i].objectBuffer.buffer, frameData[i].objectBuffer.allocation);
         });
 
         VkDescriptorSetAllocateInfo allocInfo = {};
@@ -977,7 +872,7 @@ bool VKlelu::init_descriptors()
         allocInfo.descriptorPool = descriptorPool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &globalSetLayout;
-        VK_CHECK(vkAllocateDescriptorSets(device, &allocInfo, &frameData[i].globalDescriptor));
+        VK_CHECK(vkAllocateDescriptorSets(ctx->device, &allocInfo, &frameData[i].globalDescriptor));
 
         VkDescriptorSetAllocateInfo objAllocInfo = {};
         objAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -985,7 +880,7 @@ bool VKlelu::init_descriptors()
         objAllocInfo.descriptorPool = descriptorPool;
         objAllocInfo.descriptorSetCount = 1;
         objAllocInfo.pSetLayouts = &objectSetLayout;
-        VK_CHECK(vkAllocateDescriptorSets(device, &objAllocInfo, &frameData[i].objectDescriptor));
+        VK_CHECK(vkAllocateDescriptorSets(ctx->device, &objAllocInfo, &frameData[i].objectDescriptor));
 
         VkDescriptorBufferInfo camInfo = {};
         camInfo.buffer = frameData[i].cameraBuffer.buffer;
@@ -1006,7 +901,7 @@ bool VKlelu::init_descriptors()
         VkWriteDescriptorSet sceneWrite = write_descriptor_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, frameData[i].globalDescriptor, &sceneInfo, 1);
         VkWriteDescriptorSet objWrite = write_descriptor_buffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, frameData[i].objectDescriptor, &objInfo, 0);
         VkWriteDescriptorSet writeSet[3] = { camWrite, sceneWrite, objWrite };
-        vkUpdateDescriptorSets(device, 3, writeSet, 0 , nullptr);
+        vkUpdateDescriptorSets(ctx->device, 3, writeSet, 0 , nullptr);
     }
 
     fprintf(stderr, "Descriptors initialized successfully\n");
@@ -1037,9 +932,9 @@ bool VKlelu::init_pipelines()
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.setLayoutCount = 3;
     pipelineLayoutInfo.pSetLayouts = setLayouts;
-    VK_CHECK(vkCreatePipelineLayout(device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
+    VK_CHECK(vkCreatePipelineLayout(ctx->device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
 
-    resourceJanitor.push_back([=](){ vkDestroyPipelineLayout(device, meshPipelineLayout, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyPipelineLayout(ctx->device, meshPipelineLayout, nullptr); });
 
     VertexInputDescription vertexDescription = Vertex::get_description();
 
@@ -1052,7 +947,6 @@ bool VKlelu::init_pipelines()
     builder.vertexInputInfo.vertexAttributeDescriptionCount = vertexDescription.attributes.size();
     builder.vertexInputInfo.pVertexBindingDescriptions = vertexDescription.bindings.data();
     builder.vertexInputInfo.vertexBindingDescriptionCount = vertexDescription.bindings.size();
-    builder.multisampling.rasterizationSamples = msaaLevel;
     builder.viewport.x = 0.0f;
     builder.viewport.y = 0.0f;
     builder.viewport.width = fbSize.width;
@@ -1062,12 +956,12 @@ bool VKlelu::init_pipelines()
     builder.scissor.offset = { 0, 0 };
     builder.scissor.extent = fbSize;
     builder.pipelineLayout = meshPipelineLayout;
-    meshPipeline = builder.build_pipeline(device, renderPass);
+    meshPipeline = builder.build_pipeline(ctx->device, renderPass);
 
-    resourceJanitor.push_back([=](){ vkDestroyPipeline(device, meshPipeline, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyPipeline(ctx->device, meshPipeline, nullptr); });
 
-    vkDestroyShaderModule(device, vertShader, nullptr);
-    vkDestroyShaderModule(device, fragShader, nullptr);
+    vkDestroyShaderModule(ctx->device, vertShader, nullptr);
+    vkDestroyShaderModule(ctx->device, fragShader, nullptr);
 
     if (!meshPipeline) {
         fprintf(stderr, "Failed to create graphics pipeline \"mesh\"\n");

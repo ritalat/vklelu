@@ -1,5 +1,6 @@
 #pragma once
 
+#include "context.hh"
 #include "utils.hh"
 
 #include "SDL.h"
@@ -7,8 +8,8 @@
 #include "vulkan/vulkan.h"
 
 #include <array>
-#include <deque>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -58,19 +59,19 @@ public:
 
 private:
     void draw();
-    void draw_objects(VkCommandBuffer cmd, Himmeli *first, int count);
+    void draw_objects(VkCommandBuffer cmd);
     void update();
     FrameData &get_current_frame();
 
     void set_runtime_dirs();
     void init_scene();
+    Material *create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name);
+    Mesh *get_mesh(const std::string &name);
+    Material *get_material(const std::string &name);
     void load_meshes();
     void upload_mesh(Mesh &mesh);
     void load_images();
     bool load_image(const char *path, ImageAllocation &image);
-    Material *create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name);
-    Mesh *get_mesh(const std::string &name);
-    Material *get_material(const std::string &name);
     void immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function);
     bool load_shader(const char *path, VkShaderModule &module);
     BufferAllocation create_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
@@ -88,38 +89,18 @@ private:
 
     std::string assetDir;
     std::string shaderDir;
-    bool wdIsBuildDir;
 
     int frameCount;
-
-    std::vector<Himmeli> himmelit;
-    std::unordered_map<std::string, Mesh> meshes;
-    std::unordered_map<std::string, Material> materials;
-    std::unordered_map<std::string, Texture> textures;
 
     SDL_Window *window;
     VkExtent2D fbSize;
 
-    VmaAllocator allocator;
-
-    VkInstance instance;
-    VkDebugUtilsMessengerEXT debugMessenger;
-    VkPhysicalDevice physicalDevice;
-    VkPhysicalDeviceProperties physicalDeviceProperties;
-    VkDevice device;
-    VkSurfaceKHR surface;
-    VkQueue graphicsQueue;
-    uint32_t graphicsQueueFamily;
+    std::unique_ptr<VulkanContext> ctx;
 
     VkSwapchainKHR swapchain;
     VkFormat swapchainImageFormat;
     std::vector<VkImage> swapchainImages;
     std::vector<VkImageView> swapchainImageViews;
-
-    VkSampleCountFlagBits msaaLevel;
-
-    ImageAllocation colorImage;
-    VkImageView colorImageView;
 
     ImageAllocation depthImage;
     VkImageView depthImageView;
@@ -142,5 +123,10 @@ private:
     UploadContext uploadContext;
     VkSampler linearSampler;
 
-    std::deque<std::function<void()>> resourceJanitor;
+    std::vector<Himmeli> himmelit;
+    std::unordered_map<std::string, Mesh> meshes;
+    std::unordered_map<std::string, Material> materials;
+    std::unordered_map<std::string, Texture> textures;
+
+    std::vector<std::function<void()>> resourceJanitor;
 };
