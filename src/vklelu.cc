@@ -226,9 +226,10 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
         if (himmeli.mesh != lastMesh) {
             VkDeviceSize offset = 0;
             vkCmdBindVertexBuffers(cmd, 0, 1, &himmeli.mesh->vertexBuffer->buffer, &offset);
+            vkCmdBindIndexBuffer(cmd, himmeli.mesh->indexBuffer->buffer, 0, VK_INDEX_TYPE_UINT32);
             lastMesh = himmeli.mesh;
         }
-        vkCmdDraw(cmd, himmeli.mesh->vertices.size(), 1, 0, 0);
+        vkCmdDrawIndexed(cmd, himmeli.mesh->indices.size(), 1, 0, 0, 0);
     }
 }
 
@@ -334,21 +335,27 @@ void VKlelu::load_meshes()
 
 void VKlelu::upload_mesh(Mesh &mesh)
 {
-    size_t bufferSize = mesh.vertices.size() * sizeof(Vertex);
+    size_t vertexBufferSize = mesh.vertices.size() * sizeof(Vertex);
+    size_t indexBufferSize = mesh.indices.size() * sizeof(uint32_t);
 
-    BufferAllocation stagingBuffer(ctx->allocator, bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    BufferAllocation stagingBuffer(ctx->allocator, vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
     void *data = stagingBuffer.map();
-    memcpy(data, mesh.vertices.data(), bufferSize);
+    memcpy(data, mesh.vertices.data(), vertexBufferSize);
+    memcpy((uint8_t *)data + vertexBufferSize, mesh.indices.data(), indexBufferSize);
 
-    mesh.vertexBuffer = std::make_unique<BufferAllocation>(ctx->allocator, bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    mesh.vertexBuffer = std::make_unique<BufferAllocation>(ctx->allocator, vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    mesh.indexBuffer = std::make_unique<BufferAllocation>(ctx->allocator, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
     immediate_submit([&](VkCommandBuffer cmd) {
         VkBufferCopy copy;
         copy.dstOffset = 0;
         copy.srcOffset = 0;
-        copy.size = bufferSize;
+        copy.size = vertexBufferSize;
         vkCmdCopyBuffer(cmd, stagingBuffer.buffer, mesh.vertexBuffer->buffer, 1, &copy);
+        copy.srcOffset = vertexBufferSize;
+        copy.size = indexBufferSize;
+        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, mesh.indexBuffer->buffer, 1, &copy);
     });
 }
 
@@ -373,6 +380,8 @@ void VKlelu::upload_image(const char *path, Texture &texture)
     if (!pixels) {
         throw std::runtime_error("Failed to load image: " + std::string(path));
     }
+
+    fprintf(stderr, "Image %s loaded successfully\n", path);
 
     void *pixelPtr = pixels;
     VkDeviceSize imageSize = width * height * 4;

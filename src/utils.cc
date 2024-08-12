@@ -2,13 +2,23 @@
 
 #include "struct_helpers.hh"
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include "glm/gtx/hash.hpp"
 #include "tiny_obj_loader.h"
 #include "vulkan/vulkan.h"
 
 #include <cstdio>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+bool Vertex::operator==(const Vertex &other) const {
+    return position == other.position &&
+           normal == other.normal &&
+           color == other.color &&
+           uv == other.uv;
+}
 
 VertexInputDescription Vertex::get_description()
 {
@@ -51,6 +61,13 @@ VertexInputDescription Vertex::get_description()
     return description;
 }
 
+size_t std::hash<Vertex>::operator()(const Vertex &vertex) const {
+    return hash<glm::vec3>()(vertex.position) ^
+           (hash<glm::vec3>()(vertex.normal) << 1) ^
+           (hash<glm::vec3>()(vertex.color) << 2) ^
+           (hash<glm::vec2>()(vertex.uv) << 3);
+}
+
 void Mesh::load_obj_file(const char* filename, const char *baseDir)
 {
     std::string objPath(filename);
@@ -72,36 +89,27 @@ void Mesh::load_obj_file(const char* filename, const char *baseDir)
     if (!err.empty())
         throw std::runtime_error("TinyObj err: " + err);
 
+    fprintf(stderr, "Model %s loaded successfully\n", filename);
+
+    std::unordered_map<Vertex, uint32_t> uniqueVertices;
+
     for (tinyobj::shape_t shape : shapes) {
-        size_t index_offset = 0;
-        size_t faces = shape.mesh.num_face_vertices.size();
-        for (size_t f = 0; f < faces; ++f) {
-            int faceverts = 3;
-            for (size_t v = 0; v < faceverts; ++v) {
-                tinyobj::index_t index = shape.mesh.indices[index_offset + v];
-                tinyobj::real_t vx = attrib.vertices[3 * index.vertex_index + 0];
-                tinyobj::real_t vy = attrib.vertices[3 * index.vertex_index + 1];
-                tinyobj::real_t vz = attrib.vertices[3 * index.vertex_index + 2];
-                tinyobj::real_t nx = attrib.normals[3 * index.normal_index + 0];
-                tinyobj::real_t ny = attrib.normals[3 * index.normal_index + 1];
-                tinyobj::real_t nz = attrib.normals[3 * index.normal_index + 2];
-                tinyobj::real_t ux = attrib.texcoords[2 * index.texcoord_index + 0];
-                tinyobj::real_t uy = attrib.texcoords[2 * index.texcoord_index + 1];
+        for (tinyobj::index_t index : shape.mesh.indices) {
+            Vertex vert;
+            vert.position.x = attrib.vertices[3 * index.vertex_index + 0];
+            vert.position.y = attrib.vertices[3 * index.vertex_index + 1];
+            vert.position.z = attrib.vertices[3 * index.vertex_index + 2];
+            vert.normal.x = attrib.normals[3 * index.normal_index + 0];
+            vert.normal.y = attrib.normals[3 * index.normal_index + 1];
+            vert.normal.z = attrib.normals[3 * index.normal_index + 2];
+            vert.uv.x = attrib.texcoords[2 * index.texcoord_index + 0];
+            vert.uv.y = 1.0 - attrib.texcoords[2 * index.texcoord_index + 1];
 
-                Vertex vert;
-                vert.position.x = vx;
-                vert.position.y = vy;
-                vert.position.z = vz;
-                vert.normal.x = nx;
-                vert.normal.y = ny;
-                vert.normal.z = nz;
-                vert.color = vert.normal;
-                vert.uv.x = ux;
-                vert.uv.y = 1-uy;
-
+            if (uniqueVertices.count(vert) == 0) {
+                uniqueVertices[vert] = vertices.size();
                 vertices.push_back(vert);
             }
-            index_offset += faceverts;
+            indices.push_back(uniqueVertices[vert]);
         }
     }
 }

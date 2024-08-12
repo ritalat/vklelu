@@ -33,6 +33,7 @@ struct VertexInputDescription
 
 struct Vertex
 {
+    bool operator==(const Vertex &other) const;
     static VertexInputDescription get_description();
     glm::vec3 position;
     glm::vec3 normal;
@@ -40,11 +41,18 @@ struct Vertex
     glm::vec2 uv;
 };
 
+template <>
+struct std::hash<Vertex> {
+    size_t operator()(const Vertex &vertex) const;
+};
+
 struct Mesh
 {
     void load_obj_file(const char *filename, const char *baseDir = nullptr);
     std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
     std::unique_ptr<BufferAllocation> vertexBuffer;
+    std::unique_ptr<BufferAllocation> indexBuffer;
 };
 
 struct Material
