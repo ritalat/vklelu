@@ -93,8 +93,8 @@ void Mesh::load_obj_file(const char* filename, const char *baseDir)
 
     std::unordered_map<Vertex, uint32_t> uniqueVertices;
 
-    for (tinyobj::shape_t shape : shapes) {
-        for (tinyobj::index_t index : shape.mesh.indices) {
+    for (const tinyobj::shape_t &shape : shapes) {
+        for (const tinyobj::index_t &index : shape.mesh.indices) {
             Vertex vert;
             vert.position.x = attrib.vertices[3 * index.vertex_index + 0];
             vert.position.y = attrib.vertices[3 * index.vertex_index + 1];

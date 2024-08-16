@@ -69,8 +69,8 @@ VKlelu::~VKlelu()
     if (ctx)
         vkDeviceWaitIdle(ctx->device);
 
-    for (auto destroyfn : resourceJanitor)
-        destroyfn();
+    for (auto fn = resourceJanitor.rbegin(); fn != resourceJanitor.rend(); ++fn)
+        (*fn)();
 
     if (window)
         SDL_DestroyWindow(window);
