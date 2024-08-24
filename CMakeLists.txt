@@ -45,7 +45,8 @@ set(SOURCES src/context.cc
             src/main.cc
             src/memory.cc
             src/utils.cc
-            src/vklelu.cc)
+            src/vklelu.cc
+            src/vklelu_init.cc)
 
 set(HEADERS src/context.hh
             src/memory.hh
