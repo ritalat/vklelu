@@ -1,12 +1,10 @@
 #pragma once
 
-#include "memory.hh"
-
-#include "glm/glm.hpp"
-#include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"
 
-#include <memory>
+#include <cstdio>
+#include <filesystem>
+#include <string_view>
 #include <vector>
 
 #define NS_IN_SEC 1000000000
@@ -24,57 +22,19 @@
         }                                                                                          \
     } while (0)
 
-struct VertexInputDescription
-{
-    std::vector<VkVertexInputBindingDescription> bindings;
-    std::vector<VkVertexInputAttributeDescription> attributes;
-    VkPipelineVertexInputStateCreateFlags flags = 0;
-};
+using Path = std::filesystem::path;
 
-struct Vertex
-{
-    bool operator==(const Vertex &other) const;
-    static VertexInputDescription get_description();
-    glm::vec3 position;
-    glm::vec3 normal;
-    glm::vec3 color;
-    glm::vec2 uv;
-};
+#ifdef WIN32
+// Windows std path is internally wchar :/
+#define cpath(path) path.string().data()
+#else
+#define cpath(path) path.c_str()
+#endif
 
-template <>
-struct std::hash<Vertex> {
-    size_t operator()(const Vertex &vertex) const;
-};
-
-struct Mesh
-{
-    void load_obj_file(const char *filename, const char *baseDir = nullptr);
-    std::vector<Vertex> vertices;
-    std::vector<uint32_t> indices;
-    std::unique_ptr<BufferAllocation> vertexBuffer;
-    std::unique_ptr<BufferAllocation> indexBuffer;
-};
-
-struct Material
-{
-    VkPipeline pipeline;
-    VkPipelineLayout pipelineLayout;
-    VkDescriptorSet textureSet = VK_NULL_HANDLE;
-};
-
-struct Texture {
-    std::unique_ptr<ImageAllocation> image;
-    VkImageView imageView;
-};
-
-struct Himmeli
-{
-    Mesh *mesh;
-    Material *material;
-    glm::mat4 scale;
-    glm::mat4 rotate;
-    glm::mat4 translate;
-};
+Path assetdir();
+Path shaderdir();
+Path get_asset_path(std::string_view file);
+Path get_shader_path(std::string_view file);
 
 struct PipelineBuilder
 {

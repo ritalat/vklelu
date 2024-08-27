@@ -1,6 +1,7 @@
 #pragma once
 
 #include "context.hh"
+#include "himmeli.hh"
 #include "memory.hh"
 #include "utils.hh"
 
@@ -66,15 +67,12 @@ private:
     void update();
     FrameData &get_current_frame();
 
-    void set_runtime_dirs();
     void init_scene();
-    Material *create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name);
-    Mesh *get_mesh(const std::string &name);
-    Material *get_material(const std::string &name);
-    void load_meshes();
-    void upload_mesh(Mesh &mesh);
-    void load_images();
-    void upload_image(const char *path, Texture &texture);
+    Material *create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string name);
+    Mesh *get_mesh(const std::string name);
+    Material *get_material(const std::string name);
+    void upload_mesh(ObjFile &obj, std::string name);
+    void upload_image(ImageFile &image, std::string name);
     void immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function);
     void load_shader(const char *path, VkShaderModule &module);
     size_t pad_uniform_buffer_size(size_t originalSize);
@@ -87,9 +85,6 @@ private:
     bool init_sync_structures();
     bool init_descriptors();
     bool init_pipelines();
-
-    std::string assetDir;
-    std::string shaderDir;
 
     int frameCount;
 

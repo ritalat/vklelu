@@ -42,6 +42,7 @@ endforeach()
 add_custom_target(Shaders DEPENDS ${SPIRV_BINARIES})
 
 set(SOURCES src/context.cc
+            src/himmeli.cc
             src/main.cc
             src/memory.cc
             src/utils.cc
@@ -49,6 +50,7 @@ set(SOURCES src/context.cc
             src/vklelu_init.cc)
 
 set(HEADERS src/context.hh
+            src/himmeli.hh
             src/memory.hh
             src/struct_helpers.hh
             src/utils.hh

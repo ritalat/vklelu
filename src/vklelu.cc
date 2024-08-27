@@ -1,6 +1,7 @@
 #include "vklelu.hh"
 
 #include "context.hh"
+#include "himmeli.hh"
 #include "memory.hh"
 #include "struct_helpers.hh"
 #include "utils.hh"
@@ -9,8 +10,6 @@
 #include "glm/gtc/matrix_transform.hpp"
 #include "SDL.h"
 #include "SDL_vulkan.h"
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
 #include "vulkan/vulkan.h"
 
 #include <array>
@@ -57,7 +56,8 @@ VKlelu::VKlelu(int argc, char *argv[]):
     fprintf(stderr, "Window size: %ux%u\n", WINDOW_WIDTH, WINDOW_HEIGHT);
     fprintf(stderr, "Drawable size: %ux%u\n", fbSize.width, fbSize.height);
 
-    set_runtime_dirs();
+    fprintf(stderr, "Asset directory: %s\n", cpath(assetdir()));
+    fprintf(stderr, "Shader directory: %s\n", cpath(shaderdir()));
 }
 
 VKlelu::~VKlelu()
@@ -225,7 +225,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
             vkCmdBindIndexBuffer(cmd, himmeli.mesh->indexBuffer->buffer, 0, VK_INDEX_TYPE_UINT32);
             lastMesh = himmeli.mesh;
         }
-        vkCmdDrawIndexed(cmd, himmeli.mesh->indices.size(), 1, 0, 0, 0);
+        vkCmdDrawIndexed(cmd, himmeli.mesh->numIndices, 1, 0, 0, 0);
     }
 }
 
@@ -241,23 +241,13 @@ FrameData &VKlelu::get_current_frame()
     return frameData[frameCount % MAX_FRAMES_IN_FLIGHT];
 }
 
-void VKlelu::set_runtime_dirs()
-{
-    char *ass = getenv("VKLELU_ASSETDIR");
-    assetDir = ass ? ass : "./assets";
-    assetDir.push_back('/');
-    fprintf(stderr, "Asset directory: %s\n", assetDir.c_str());
-
-    char *sdr = getenv("VKLELU_SHADERDIR");
-    shaderDir = sdr ? sdr : "./shaders";
-    shaderDir.push_back('/');
-    fprintf(stderr, "Shader directory: %s\n", shaderDir.c_str());
-}
-
 void VKlelu::init_scene()
 {
-    load_meshes();
-    load_images();
+    ObjFile monkeyObj("suzanne.obj");
+    upload_mesh(monkeyObj, "monkey");
+
+    ImageFile monkeyTexture("suzanne_uv.png");
+    upload_image(monkeyTexture, "monkey_diffuse");
 
     create_material(meshPipeline, meshPipelineLayout, "monkey_material");
 
@@ -296,7 +286,7 @@ void VKlelu::init_scene()
     sceneParameters.lightColor = { 1.0f, 1.0f, 1.0f, 0.0f };
 }
 
-Material *VKlelu::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string &name)
+Material *VKlelu::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string name)
 {
     Material mat;
     mat.pipeline = pipeline;
@@ -305,7 +295,7 @@ Material *VKlelu::create_material(VkPipeline pipeline, VkPipelineLayout layout, 
     return &materials[name];
 }
 
-Mesh *VKlelu::get_mesh(const std::string &name)
+Mesh *VKlelu::get_mesh(const std::string name)
 {
     auto it = meshes.find(name);
     if (it == meshes.end())
@@ -313,7 +303,7 @@ Mesh *VKlelu::get_mesh(const std::string &name)
     return &(*it).second;
 }
 
-Material *VKlelu::get_material(const std::string &name)
+Material *VKlelu::get_material(const std::string name)
 {
     auto it = materials.find(name);
     if (it == materials.end())
@@ -321,24 +311,19 @@ Material *VKlelu::get_material(const std::string &name)
     return &(*it).second;
 }
 
-void VKlelu::load_meshes()
+void VKlelu::upload_mesh(ObjFile &obj, std::string name)
 {
-    Mesh monkeyMesh;
-    monkeyMesh.load_obj_file("suzanne.obj", assetDir.c_str());
-    upload_mesh(monkeyMesh);
-    meshes["monkey"] = std::move(monkeyMesh);
-}
-
-void VKlelu::upload_mesh(Mesh &mesh)
-{
-    size_t vertexBufferSize = mesh.vertices.size() * sizeof(Vertex);
-    size_t indexBufferSize = mesh.indices.size() * sizeof(uint32_t);
+    Mesh mesh;
+    mesh.numVertices = obj.vertices.size();
+    mesh.numIndices = obj.indices.size();
+    size_t vertexBufferSize = mesh.numVertices * sizeof(Vertex);
+    size_t indexBufferSize = mesh.numIndices * sizeof(uint32_t);
 
     BufferAllocation stagingBuffer(ctx->allocator, vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
     void *data = stagingBuffer.map();
-    memcpy(data, mesh.vertices.data(), vertexBufferSize);
-    memcpy((uint8_t *)data + vertexBufferSize, mesh.indices.data(), indexBufferSize);
+    memcpy(data, obj.vertices.data(), vertexBufferSize);
+    memcpy((uint8_t *)data + vertexBufferSize, obj.indices.data(), indexBufferSize);
 
     mesh.vertexBuffer = std::make_unique<BufferAllocation>(ctx->allocator, vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
     mesh.indexBuffer = std::make_unique<BufferAllocation>(ctx->allocator, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -353,46 +338,24 @@ void VKlelu::upload_mesh(Mesh &mesh)
         copy.size = indexBufferSize;
         vkCmdCopyBuffer(cmd, stagingBuffer.buffer, mesh.indexBuffer->buffer, 1, &copy);
     });
+
+    meshes[name] = std::move(mesh);
 }
 
-void VKlelu::load_images()
+void VKlelu::upload_image(ImageFile &image, std::string name)
 {
-    Texture monkey;
-    upload_image("suzanne_uv.png", monkey);
-    monkey.imageView = monkey.image->create_image_view(ctx->device, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
-    textures["monkey_diffuse"] = std::move(monkey);
-}
-
-void VKlelu::upload_image(const char *path, Texture &texture)
-{
-    int width;
-    int height;
-    int channels;
-
-    std::string fullPath = assetDir + std::string(path);
-
-    stbi_uc *pixels = stbi_load(fullPath.c_str(), &width, &height, &channels, STBI_rgb_alpha);
-
-    if (!pixels) {
-        throw std::runtime_error("Failed to load image: " + std::string(path));
-    }
-
-    fprintf(stderr, "Image %s loaded successfully\n", path);
-
-    void *pixelPtr = pixels;
-    VkDeviceSize imageSize = width * height * 4;
+    Texture texture;
+    VkDeviceSize imageSize = image.width * image.height * 4;
     VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
     BufferAllocation stagingBuffer(ctx->allocator, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
     void *data = stagingBuffer.map();
-    memcpy(data, pixelPtr, imageSize);
-
-    stbi_image_free(pixels);
+    memcpy(data, image.pixels, imageSize);
 
     VkExtent3D imageExtent;
-    imageExtent.width = width;
-    imageExtent.height = height;
+    imageExtent.width = image.width;
+    imageExtent.height = image.height;
     imageExtent.depth = 1;
 
     texture.image = std::make_unique<ImageAllocation>(ctx->allocator, imageExtent, imageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
@@ -437,6 +400,9 @@ void VKlelu::upload_image(const char *path, Texture &texture)
 
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier2);
     });
+
+    texture.imageView = texture.image->create_image_view(ctx->device, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+    textures[name] = std::move(texture);
 }
 
 void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function)
@@ -462,9 +428,9 @@ void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&functi
 
 void VKlelu::load_shader(const char *path, VkShaderModule &module)
 {
-    std::string fullPath = shaderDir + std::string(path);
+    Path fullPath = get_shader_path(path);
 
-    FILE *f = fopen(fullPath.c_str(), "rb");
+    FILE *f = fopen(cpath(fullPath), "rb");
     if (!f) {
         throw std::runtime_error("Failed to open file: " + std::string(path));
     }

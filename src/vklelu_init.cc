@@ -1,6 +1,7 @@
 #include "vklelu.hh"
 
 #include "context.hh"
+#include "himmeli.hh"
 #include "memory.hh"
 #include "struct_helpers.hh"
 #include "utils.hh"
