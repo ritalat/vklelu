@@ -11,49 +11,34 @@
 
 #include <cstdio>
 #include <memory>
+#include <stdexcept>
 #include <vector>
 
 #define MAX_OBJECTS 10000
 
-bool VKlelu::init_vulkan()
+void VKlelu::init_vulkan()
 {
     ctx = std::make_unique<VulkanContext>(window);
-
-    if (!init_swapchain())
-        return false;
-
-    if (!init_commands())
-        return false;
-
-    if (!init_default_renderpass())
-        return false;
-
-    if (!init_framebuffers())
-        return false;
-
-    if (!init_sync_structures())
-        return false;
-
-    if (!init_descriptors())
-        return false;
-
-    if (!init_pipelines())
-        return false;
-
-    return true;
+    init_swapchain();
+    init_commands();
+    init_default_renderpass();
+    init_framebuffers();
+    init_sync_structures();
+    init_descriptors();
+    init_pipelines();
 }
 
-bool VKlelu::init_swapchain()
+void VKlelu::init_swapchain()
 {
     vkb::SwapchainBuilder swapchainBuilder{ ctx->physicalDevice, ctx->device, ctx->surface };
     auto swap_ret = swapchainBuilder.use_default_format_selection()
                                     .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
                                     .set_desired_extent(fbSize.width, fbSize.height)
                                     .build();
-    if (!swap_ret) {
-        fprintf(stderr, "Failed to create swapchain. Error: %s\n", swap_ret.error().message().c_str());
-        return false;
-    }
+
+    if (!swap_ret)
+        throw std::runtime_error("Failed to create swapchain. Error: " + swap_ret.error().message());
+
     vkb::Swapchain vkb_swapchain = swap_ret.value();
     swapchain = vkb_swapchain.swapchain;
     swapchainImageFormat = vkb_swapchain.image_format;
@@ -72,11 +57,10 @@ bool VKlelu::init_swapchain()
     depthImage.image = std::make_unique<ImageAllocation>(ctx->allocator, imageExtent, depthImageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
     depthImage.imageView = depthImage.image->create_image_view(ctx->device, depthImageFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-    fprintf(stderr, "Swapchain initialized successfully\n");
-    return true;
+    fprintf(stderr, "Swapchain initialized\n");
 }
 
-bool VKlelu::init_commands()
+void VKlelu::init_commands()
 {
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         VkCommandPoolCreateInfo commandPoolInfo = command_pool_create_info(ctx->graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
@@ -96,11 +80,10 @@ bool VKlelu::init_commands()
 
     resourceJanitor.push_back([=](){ vkDestroyCommandPool(ctx->device, uploadContext.commandPool, nullptr); });
 
-    fprintf(stderr, "Command pool initialized successfully\n");
-    return true;
+    fprintf(stderr, "Command pool initialized\n");
 }
 
-bool VKlelu::init_default_renderpass()
+void VKlelu::init_default_renderpass()
 {
     VkAttachmentDescription colorAttachment = {};
     colorAttachment.format = swapchainImageFormat;
@@ -169,11 +152,10 @@ bool VKlelu::init_default_renderpass()
 
     resourceJanitor.push_back([=](){ vkDestroyRenderPass(ctx->device, renderPass, nullptr); });
 
-    fprintf(stderr, "Renderpass initialized successfully\n");
-    return true;
+    fprintf(stderr, "Renderpass initialized\n");
 }
 
-bool VKlelu::init_framebuffers()
+void VKlelu::init_framebuffers()
 {
     VkFramebufferCreateInfo fbInfo = framebuffer_create_info(renderPass, fbSize);
 
@@ -192,11 +174,10 @@ bool VKlelu::init_framebuffers()
         });
     }
 
-    fprintf(stderr, "Framebuffers initialized successfully\n");
-    return true;
+    fprintf(stderr, "Framebuffers initialized\n");
 }
 
-bool VKlelu::init_sync_structures()
+void VKlelu::init_sync_structures()
 {
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         VkFenceCreateInfo fenceCreateInfo = fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
@@ -217,11 +198,10 @@ bool VKlelu::init_sync_structures()
     VK_CHECK(vkCreateFence(ctx->device, &uploadFenceInfo, nullptr, &uploadContext.uploadFence));
     resourceJanitor.push_back([=](){ vkDestroyFence(ctx->device, uploadContext.uploadFence, nullptr); });
 
-    fprintf(stderr, "Sync structures initialized successfully\n");
-    return true;
+    fprintf(stderr, "Sync structures initialized\n");
 }
 
-bool VKlelu::init_descriptors()
+void VKlelu::init_descriptors()
 {
     size_t sceneParamBufferSize = MAX_FRAMES_IN_FLIGHT * pad_uniform_buffer_size(sizeof(SceneData));
     sceneParameterBuffer = std::make_unique<BufferAllocation>(ctx->allocator, sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
@@ -329,19 +309,18 @@ bool VKlelu::init_descriptors()
         vkUpdateDescriptorSets(ctx->device, 3, writeSet, 0 , nullptr);
     }
 
-    fprintf(stderr, "Descriptors initialized successfully\n");
-    return true;
+    fprintf(stderr, "Descriptors initialized\n");
 }
 
-bool VKlelu::init_pipelines()
+void VKlelu::init_pipelines()
 {
     VkShaderModule fragShader;
     load_shader("shader.frag.spv", fragShader);
-    fprintf(stderr, "Fragment shader module shader.frag.spv created successfully\n");
+    fprintf(stderr, "Shader module shader.frag.spv created\n");
 
     VkShaderModule vertShader;
     load_shader("shader.vert.spv", vertShader);
-    fprintf(stderr, "Vertex shader module shader.vert.spv created successfully\n");
+    fprintf(stderr, "Shader module shader.vert.spv created\n");
 
     VkPushConstantRange pushConstant;
     pushConstant.offset = 0;
@@ -386,11 +365,8 @@ bool VKlelu::init_pipelines()
     vkDestroyShaderModule(ctx->device, vertShader, nullptr);
     vkDestroyShaderModule(ctx->device, fragShader, nullptr);
 
-    if (!meshPipeline) {
-        fprintf(stderr, "Failed to create graphics pipeline \"mesh\"\n");
-        return false;
-    }
+    if (!meshPipeline)
+        throw std::runtime_error("Failed to create graphics pipeline \"mesh\"");
 
-    fprintf(stderr, "Graphics pipelines initialized successfully\n");
-    return true;
+    fprintf(stderr, "Graphics pipelines initialized\n");
 }

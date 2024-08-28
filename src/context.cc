@@ -86,7 +86,7 @@ VulkanContext::VulkanContext(SDL_Window *window):
     allocatorInfo.device = device;
     VK_CHECK(vmaCreateAllocator(&allocatorInfo, &allocator));
 
-    fprintf(stderr, "Vulkan 1.%d initialized successfully\n", REQUIRED_VK_VERSION_MINOR);
+    fprintf(stderr, "Vulkan 1.%d initialized\n", REQUIRED_VK_VERSION_MINOR);
 }
 
 VulkanContext::~VulkanContext()

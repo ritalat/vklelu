@@ -62,9 +62,9 @@ public:
     int run();
 
 private:
+    void update();
     void draw();
     void draw_objects(VkCommandBuffer cmd);
-    void update();
     FrameData &get_current_frame();
 
     void init_scene();
@@ -77,14 +77,14 @@ private:
     void load_shader(const char *path, VkShaderModule &module);
     size_t pad_uniform_buffer_size(size_t originalSize);
 
-    bool init_vulkan();
-    bool init_swapchain();
-    bool init_commands();
-    bool init_default_renderpass();
-    bool init_framebuffers();
-    bool init_sync_structures();
-    bool init_descriptors();
-    bool init_pipelines();
+    void init_vulkan();
+    void init_swapchain();
+    void init_commands();
+    void init_default_renderpass();
+    void init_framebuffers();
+    void init_sync_structures();
+    void init_descriptors();
+    void init_pipelines();
 
     int frameCount;
 

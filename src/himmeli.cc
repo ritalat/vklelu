@@ -13,12 +13,12 @@
 #include <cstddef>
 #include <cstdio>
 #include <stdexcept>
+#include <string_view>
 
 bool Vertex::operator==(const Vertex &other) const {
     return position == other.position &&
            normal == other.normal &&
-           color == other.color &&
-           uv == other.uv;
+           texcoord == other.texcoord;
 }
 
 VertexInputDescription Vertex::get_description()
@@ -45,19 +45,12 @@ VertexInputDescription Vertex::get_description()
     normalAttribute.offset = offsetof(Vertex, normal);
     description.attributes.push_back(normalAttribute);
 
-    VkVertexInputAttributeDescription colorAttribute = {};
-    colorAttribute.binding = 0;
-    colorAttribute.location = 2;
-    colorAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    colorAttribute.offset = offsetof(Vertex, color);
-    description.attributes.push_back(colorAttribute);
-
-    VkVertexInputAttributeDescription uvAttribute = {};
-    uvAttribute.binding = 0;
-    uvAttribute.location = 3;
-    uvAttribute.format = VK_FORMAT_R32G32_SFLOAT;
-    uvAttribute.offset = offsetof(Vertex, uv);
-    description.attributes.push_back(uvAttribute);
+    VkVertexInputAttributeDescription texcoordAttribute = {};
+    texcoordAttribute.binding = 0;
+    texcoordAttribute.location = 2;
+    texcoordAttribute.format = VK_FORMAT_R32G32_SFLOAT;
+    texcoordAttribute.offset = offsetof(Vertex, texcoord);
+    description.attributes.push_back(texcoordAttribute);
 
     return description;
 }
@@ -65,11 +58,10 @@ VertexInputDescription Vertex::get_description()
 size_t std::hash<Vertex>::operator()(const Vertex &vertex) const {
     return hash<glm::vec3>()(vertex.position) ^
            (hash<glm::vec3>()(vertex.normal) << 1) ^
-           (hash<glm::vec3>()(vertex.color) << 2) ^
-           (hash<glm::vec2>()(vertex.uv) << 3);
+           (hash<glm::vec2>()(vertex.texcoord) << 2);
 }
 
-ObjFile::ObjFile(const char* filename)
+ObjFile::ObjFile(const std::string_view filename)
 {
     Path objPath = get_asset_path(filename);
 
@@ -88,7 +80,7 @@ ObjFile::ObjFile(const char* filename)
     if (!err.empty())
         throw std::runtime_error("TinyObj err: " + err);
 
-    fprintf(stderr, "Model %s loaded successfully\n", filename);
+    fprintf(stderr, "Model %s loaded\n", filename.data());
 
     std::unordered_map<Vertex, uint32_t> uniqueVertices;
 
@@ -101,8 +93,8 @@ ObjFile::ObjFile(const char* filename)
             vert.normal.x = attrib.normals[3 * index.normal_index + 0];
             vert.normal.y = attrib.normals[3 * index.normal_index + 1];
             vert.normal.z = attrib.normals[3 * index.normal_index + 2];
-            vert.uv.x = attrib.texcoords[2 * index.texcoord_index + 0];
-            vert.uv.y = 1.0 - attrib.texcoords[2 * index.texcoord_index + 1];
+            vert.texcoord.x = attrib.texcoords[2 * index.texcoord_index + 0];
+            vert.texcoord.y = 1.0 - attrib.texcoords[2 * index.texcoord_index + 1];
 
             if (uniqueVertices.count(vert) == 0) {
                 uniqueVertices[vert] = vertices.size();
@@ -113,7 +105,7 @@ ObjFile::ObjFile(const char* filename)
     }
 }
 
-ImageFile::ImageFile(const char *filename)
+ImageFile::ImageFile(const std::string_view filename)
 {
     Path fullPath = get_asset_path(filename);
 
@@ -123,7 +115,7 @@ ImageFile::ImageFile(const char *filename)
         throw std::runtime_error("Failed to load image: " + std::string(filename));
     }
 
-    fprintf(stderr, "Image %s loaded successfully\n", filename);
+    fprintf(stderr, "Image %s loaded\n", filename.data());
 }
 
 ImageFile::~ImageFile()

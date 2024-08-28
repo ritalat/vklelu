@@ -6,6 +6,7 @@
 #include "vulkan/vulkan.h"
 
 #include <memory>
+#include <string_view>
 #include <vector>
 
 struct VertexInputDescription
@@ -21,8 +22,7 @@ struct Vertex
     static VertexInputDescription get_description();
     glm::vec3 position;
     glm::vec3 normal;
-    glm::vec3 color;
-    glm::vec2 uv;
+    glm::vec2 texcoord;
 };
 
 template <>
@@ -32,7 +32,7 @@ struct std::hash<Vertex> {
 
 struct ObjFile
 {
-    ObjFile(const char *filename);
+    ObjFile(const std::string_view filename);
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
 };
@@ -47,15 +47,16 @@ struct Mesh
 
 struct ImageFile
 {
-    ImageFile(const char *filename);
+    ImageFile(const std::string_view filename);
     ~ImageFile();
-    unsigned char *pixels;
+    unsigned char *pixels = nullptr;
     int width;
     int height;
     int channels;
 };
 
-struct Texture {
+struct Texture
+{
     std::unique_ptr<ImageAllocation> image;
     VkImageView imageView;
 };

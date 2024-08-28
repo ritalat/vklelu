@@ -76,9 +76,7 @@ VKlelu::~VKlelu()
 
 int VKlelu::run()
 {
-    if (!init_vulkan())
-        return EXIT_FAILURE;
-
+    init_vulkan();
     init_scene();
 
     bool quit = false;
@@ -106,6 +104,13 @@ int VKlelu::run()
     return EXIT_SUCCESS;
 }
 
+void VKlelu::update()
+{
+    for (Himmeli &himmeli : himmelit) {
+        himmeli.rotate = glm::rotate(glm::mat4{ 1.0f }, glm::radians(SDL_GetTicks() / 20.0f), glm::vec3(0, 1, 0));
+    }
+}
+
 void VKlelu::draw()
 {
     FrameData &currentFrame = get_current_frame();
@@ -125,8 +130,7 @@ void VKlelu::draw()
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
     VkClearValue clearValue;
-    float flash = abs(sin(SDL_GetTicks() / 1000.0f));
-    clearValue.color = { { 0.0f, 0.0f, flash, 1.0f } };
+    clearValue.color = { { 0.0f, 0.0f, 0.5f, 1.0f } };
 
     VkClearValue depthClearValue;
     depthClearValue.depthStencil.depth = 1.0f;
@@ -226,13 +230,6 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
             lastMesh = himmeli.mesh;
         }
         vkCmdDrawIndexed(cmd, himmeli.mesh->numIndices, 1, 0, 0, 0);
-    }
-}
-
-void VKlelu::update()
-{
-    for (Himmeli &himmeli : himmelit) {
-        himmeli.rotate = glm::rotate(glm::mat4{ 1.0f }, glm::radians(SDL_GetTicks() / 20.0f), glm::vec3(0, 1, 0));
     }
 }
 
