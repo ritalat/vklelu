@@ -41,6 +41,10 @@ endforeach()
 
 add_custom_target(Shaders DEPENDS ${SPIRV_BINARIES})
 
+add_library(single_header STATIC src/lib_impl.cc)
+set_target_properties(single_header PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_link_libraries(single_header Vulkan::Vulkan stb VulkanMemoryAllocator)
+
 set(SOURCES src/context.cc
             src/himmeli.cc
             src/main.cc
@@ -73,15 +77,21 @@ if(UNIX)
     set_target_properties(vklelu PROPERTIES INSTALL_RPATH "\${ORIGIN}")
 endif()
 
+if(MSVC)
+    target_compile_options(vklelu PRIVATE /W4)
+    target_compile_definitions(vklelu PRIVATE _CRT_SECURE_NO_WARNINGS)
+else()
+    target_compile_options(vklelu PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+endif()
+
 add_dependencies(vklelu Shaders)
 target_link_libraries(vklelu Vulkan::Vulkan
                              SDL2::SDL2
                              SDL2::SDL2main
                              glm::glm
-                             stb
                              tinyobjloader
                              vk-bootstrap::vk-bootstrap
-                             VulkanMemoryAllocator)
+                             single_header)
 
 install(TARGETS vklelu SDL2 RUNTIME DESTINATION ".")
 

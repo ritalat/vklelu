@@ -3,7 +3,6 @@
 #include "struct_helpers.hh"
 #include "utils.hh"
 
-#define VMA_IMPLEMENTATION
 #include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"
 

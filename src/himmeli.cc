@@ -5,7 +5,6 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include "glm/glm.hpp"
 #include "glm/gtx/hash.hpp"
-#define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 #include "tiny_obj_loader.h"
 #include "vulkan/vulkan.h"
