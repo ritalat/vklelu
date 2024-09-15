@@ -16,8 +16,8 @@
 
 VulkanContext::VulkanContext(SDL_Window *window):
     instance(VK_NULL_HANDLE),
-    surface(VK_NULL_HANDLE),
     device(VK_NULL_HANDLE),
+    surface(VK_NULL_HANDLE),
     allocator(VK_NULL_HANDLE)
 {
 #if !defined(NDEBUG)

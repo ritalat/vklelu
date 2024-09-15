@@ -93,10 +93,10 @@ ObjFile::ObjFile(const std::string_view filename)
             vert.normal.y = attrib.normals[3 * index.normal_index + 1];
             vert.normal.z = attrib.normals[3 * index.normal_index + 2];
             vert.texcoord.x = attrib.texcoords[2 * index.texcoord_index + 0];
-            vert.texcoord.y = 1.0 - attrib.texcoords[2 * index.texcoord_index + 1];
+            vert.texcoord.y = 1.0f - attrib.texcoords[2 * index.texcoord_index + 1];
 
             if (uniqueVertices.count(vert) == 0) {
-                uniqueVertices[vert] = vertices.size();
+                uniqueVertices[vert] = static_cast<uint32_t>(vertices.size());
                 vertices.push_back(vert);
             }
             indices.push_back(uniqueVertices[vert]);

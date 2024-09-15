@@ -60,6 +60,10 @@ ImageAllocation::ImageAllocation(VmaAllocator allocator, VkExtent3D extent, VkFo
 {
     this->allocator = allocator;
 
+    VmaAllocatorInfo allocatorInfo = {};
+    vmaGetAllocatorInfo(this->allocator, &allocatorInfo);
+    this->device = allocatorInfo.device;
+
     VkImageCreateInfo imgInfo = image_create_info(format, usage, extent);
     imgInfo.samples = samples;
 
@@ -79,12 +83,8 @@ ImageAllocation::~ImageAllocation()
     vmaDestroyImage(allocator, image, allocation);
 }
 
-VkImageView ImageAllocation::create_image_view(VkDevice device, VkFormat format, VkImageAspectFlags aspectFlags)
+VkImageView ImageAllocation::create_image_view(VkFormat format, VkImageAspectFlags aspectFlags)
 {
-    if (!(this->device)) {
-        this->device = device;
-    }
-
     VkImageViewCreateInfo viewInfo = imageview_create_info(format, image, aspectFlags);
     VkImageView imageView;
     VK_CHECK(vkCreateImageView(this->device, &viewInfo, nullptr, &imageView));

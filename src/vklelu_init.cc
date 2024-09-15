@@ -55,7 +55,7 @@ void VKlelu::init_swapchain()
     depthImageFormat = VK_FORMAT_D32_SFLOAT;
 
     depthImage.image = std::make_unique<ImageAllocation>(ctx->allocator, imageExtent, depthImageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-    depthImage.imageView = depthImage.image->create_image_view(ctx->device, depthImageFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+    depthImage.imageView = depthImage.image->create_image_view(depthImageFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 
     fprintf(stderr, "Swapchain initialized\n");
 }
@@ -159,10 +159,10 @@ void VKlelu::init_framebuffers()
 {
     VkFramebufferCreateInfo fbInfo = framebuffer_create_info(renderPass, fbSize);
 
-    uint32_t swapchainImageCount = swapchainImages.size();
+    size_t swapchainImageCount = swapchainImages.size();
     framebuffers = std::vector<VkFramebuffer>(swapchainImageCount);
 
-    for (int i = 0; i < swapchainImageCount; ++i) {
+    for (size_t i = 0; i < swapchainImageCount; ++i) {
         VkImageView attachments[2] = { swapchainImageViews[i], depthImage.imageView };
         fbInfo.attachmentCount = 2;
         fbInfo.pAttachments = &attachments[0];
@@ -258,7 +258,7 @@ void VKlelu::init_descriptors()
     poolInfo.pNext = nullptr;
     poolInfo.flags = 0;
     poolInfo.maxSets = 10;
-    poolInfo.poolSizeCount = sizes.size();
+    poolInfo.poolSizeCount = static_cast<uint32_t>(sizes.size());
     poolInfo.pPoolSizes = sizes.data();
 
     VK_CHECK(vkCreateDescriptorPool(ctx->device, &poolInfo, nullptr, &descriptorPool));
@@ -346,13 +346,13 @@ void VKlelu::init_pipelines()
     builder.shaderStages.push_back(pipeline_shader_stage_create_info(VK_SHADER_STAGE_FRAGMENT_BIT, fragShader));
     builder.vertexInputInfo = vertex_input_state_create_info();
     builder.vertexInputInfo.pVertexAttributeDescriptions = vertexDescription.attributes.data();
-    builder.vertexInputInfo.vertexAttributeDescriptionCount = vertexDescription.attributes.size();
+    builder.vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexDescription.attributes.size());
     builder.vertexInputInfo.pVertexBindingDescriptions = vertexDescription.bindings.data();
-    builder.vertexInputInfo.vertexBindingDescriptionCount = vertexDescription.bindings.size();
+    builder.vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(vertexDescription.bindings.size());
     builder.viewport.x = 0.0f;
     builder.viewport.y = 0.0f;
-    builder.viewport.width = fbSize.width;
-    builder.viewport.height = fbSize.height;
+    builder.viewport.width = static_cast<float>(fbSize.width);
+    builder.viewport.height = static_cast<float>(fbSize.height);
     builder.viewport.minDepth = 0.0f;
     builder.viewport.maxDepth = 1.0f;
     builder.scissor.offset = { 0, 0 };

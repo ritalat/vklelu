@@ -29,7 +29,7 @@ struct ImageAllocation
     ImageAllocation(const ImageAllocation &) = delete;
     ImageAllocation &operator=(const ImageAllocation &) = delete;
 
-    VkImageView create_image_view(VkDevice device, VkFormat format, VkImageAspectFlags aspectFlags);
+    VkImageView create_image_view(VkFormat format, VkImageAspectFlags aspectFlags);
 
     VkImage image;
     VmaAllocation allocation;

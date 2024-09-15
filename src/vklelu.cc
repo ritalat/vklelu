@@ -107,7 +107,7 @@ int VKlelu::run()
 void VKlelu::update()
 {
     for (Himmeli &himmeli : himmelit) {
-        himmeli.rotate = glm::rotate(glm::mat4{ 1.0f }, glm::radians(SDL_GetTicks() / 20.0f), glm::vec3(0, 1, 0));
+        himmeli.rotate = glm::rotate(glm::mat4{ 1.0f }, glm::radians(static_cast<float>(SDL_GetTicks()) / 20.0f), glm::vec3(0, 1, 0));
     }
 }
 
@@ -179,7 +179,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
     glm::vec3 camera = { 0.0f, 0.0f, -5.0f };
     sceneParameters.cameraPos = glm::vec4{ camera, 1.0f };
     glm::mat4 view = glm::translate(glm::mat4(1.0f), camera);
-    glm::mat4 projection = glm::perspective(glm::radians(70.0f), (float)fbSize.width/(float)fbSize.height, 0.1f, 200.0f);
+    glm::mat4 projection = glm::perspective(glm::radians(70.0f), static_cast<float>(fbSize.width)/static_cast<float>(fbSize.height), 0.1f, 200.0f);
     projection[1][1] *= -1;
 
     CameraData cam;
@@ -197,14 +197,14 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
 
     void *objData = currentFrame.objectBufferMapping;;
     ObjectData *objectSSBO = (ObjectData *)objData;
-    for (int i = 0; i < himmelit.size(); ++i) {
+    for (size_t i = 0; i < himmelit.size(); ++i) {
         objectSSBO[i].model = himmelit[i].translate * himmelit[i].rotate * himmelit[i].scale;
     }
 
     Mesh *lastMesh = nullptr;
     Material *lastMaterial = nullptr;
 
-    for (int i = 0; i < himmelit.size(); ++i) {
+    for (size_t i = 0; i < himmelit.size(); ++i) {
         Himmeli &himmeli = himmelit[i];
         if (!himmeli.material || !himmeli.mesh)
             continue;
@@ -212,7 +212,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
         if (himmeli.material != lastMaterial) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipeline);
             lastMaterial = himmeli.material;
-            uint32_t uniformOffset = pad_uniform_buffer_size(sizeof(SceneData)) * frameIndex;
+            uint32_t uniformOffset = static_cast<uint32_t>(pad_uniform_buffer_size(sizeof(SceneData))) * frameIndex;
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipelineLayout, 0, 1, &currentFrame.globalDescriptor, 1, &uniformOffset);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipelineLayout, 1, 1, &currentFrame.objectDescriptor, 0, nullptr);
 
@@ -221,7 +221,8 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
             }
         }
 
-        vkCmdPushConstants(cmd, himmeli.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(int), &i);
+        int ii = static_cast<int>(i);
+        vkCmdPushConstants(cmd, himmeli.material->pipelineLayout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(int), &ii);
 
         if (himmeli.mesh != lastMesh) {
             VkDeviceSize offset = 0;
@@ -311,8 +312,8 @@ Material *VKlelu::get_material(const std::string name)
 void VKlelu::upload_mesh(ObjFile &obj, std::string name)
 {
     Mesh mesh;
-    mesh.numVertices = obj.vertices.size();
-    mesh.numIndices = obj.indices.size();
+    mesh.numVertices = static_cast<uint32_t>(obj.vertices.size());
+    mesh.numIndices = static_cast<uint32_t>(obj.indices.size());
     size_t vertexBufferSize = mesh.numVertices * sizeof(Vertex);
     size_t indexBufferSize = mesh.numIndices * sizeof(uint32_t);
 
@@ -398,7 +399,7 @@ void VKlelu::upload_image(ImageFile &image, std::string name)
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier2);
     });
 
-    texture.imageView = texture.image->create_image_view(ctx->device, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+    texture.imageView = texture.image->create_image_view(VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
     textures[name] = std::move(texture);
 }
 
@@ -440,7 +441,7 @@ void VKlelu::load_shader(const char *path, VkShaderModule &module)
     size_t ret = fread(&spv_data[0], sizeof(spv_data[0]), spv_data.size(), f);
     fclose(f);
 
-    if ((ret * sizeof(uint32_t)) != fileSize) {
+    if ((ret * sizeof(uint32_t)) != static_cast<size_t>(fileSize)) {
         throw std::runtime_error("Failed to read file: " + std::string(path));
     }
 
