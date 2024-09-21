@@ -21,8 +21,6 @@ void VKlelu::init_vulkan()
     ctx = std::make_unique<VulkanContext>(window);
     init_swapchain();
     init_commands();
-    init_default_renderpass();
-    init_framebuffers();
     init_sync_structures();
     init_descriptors();
     init_pipelines();
@@ -46,6 +44,9 @@ void VKlelu::init_swapchain()
     swapchainImageViews = vkb_swapchain.get_image_views().value();
 
     resourceJanitor.push_back([=](){ vkDestroySwapchainKHR(ctx->device, swapchain, nullptr); });
+    for (VkImageView swapView : swapchainImageViews) {
+        resourceJanitor.push_back([=](){ vkDestroyImageView(ctx->device, swapView, nullptr); });
+    }
 
     VkExtent3D imageExtent = {
         fbSize.width,
@@ -81,100 +82,6 @@ void VKlelu::init_commands()
     resourceJanitor.push_back([=](){ vkDestroyCommandPool(ctx->device, uploadContext.commandPool, nullptr); });
 
     fprintf(stderr, "Command pool initialized\n");
-}
-
-void VKlelu::init_default_renderpass()
-{
-    VkAttachmentDescription colorAttachment = {};
-    colorAttachment.format = swapchainImageFormat;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-    VkAttachmentReference colorAttachmentRef = {};
-    colorAttachmentRef.attachment = 0;
-    colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentDescription depthAttachment = {};
-    depthAttachment.flags = 0;
-    depthAttachment.format = depthImageFormat;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference depthAttachmentRef = {};
-    depthAttachmentRef.attachment = 1;
-    depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass = {};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorAttachmentRef;
-    subpass.pDepthStencilAttachment = &depthAttachmentRef;
-
-    VkSubpassDependency dependency = {};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-    VkSubpassDependency depthDependency = {};
-    depthDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    depthDependency.dstSubpass = 0;
-    depthDependency.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    depthDependency.srcAccessMask = 0;
-    depthDependency.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    depthDependency.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-    VkAttachmentDescription attachments[2] = { colorAttachment, depthAttachment };
-    VkSubpassDependency dependencies[2] = { dependency, depthDependency };
-
-    VkRenderPassCreateInfo renderPassInfo = {};
-    renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = 2;
-    renderPassInfo.pAttachments = &attachments[0];
-    renderPassInfo.subpassCount = 1;
-    renderPassInfo.pSubpasses = &subpass;
-    renderPassInfo.dependencyCount = 2;
-    renderPassInfo.pDependencies = &dependencies[0];
-
-    VK_CHECK(vkCreateRenderPass(ctx->device, &renderPassInfo, nullptr, &renderPass));
-
-    resourceJanitor.push_back([=](){ vkDestroyRenderPass(ctx->device, renderPass, nullptr); });
-
-    fprintf(stderr, "Renderpass initialized\n");
-}
-
-void VKlelu::init_framebuffers()
-{
-    VkFramebufferCreateInfo fbInfo = framebuffer_create_info(renderPass, fbSize);
-
-    size_t swapchainImageCount = swapchainImages.size();
-    framebuffers = std::vector<VkFramebuffer>(swapchainImageCount);
-
-    for (size_t i = 0; i < swapchainImageCount; ++i) {
-        VkImageView attachments[2] = { swapchainImageViews[i], depthImage.imageView };
-        fbInfo.attachmentCount = 2;
-        fbInfo.pAttachments = &attachments[0];
-        VK_CHECK(vkCreateFramebuffer(ctx->device, &fbInfo, nullptr, &framebuffers[i]));
-
-        resourceJanitor.push_back([=](){
-            vkDestroyImageView(ctx->device, swapchainImageViews[i], nullptr);
-            vkDestroyFramebuffer(ctx->device, framebuffers[i], nullptr);
-        });
-    }
-
-    fprintf(stderr, "Framebuffers initialized\n");
 }
 
 void VKlelu::init_sync_structures()
@@ -358,7 +265,7 @@ void VKlelu::init_pipelines()
     builder.scissor.offset = { 0, 0 };
     builder.scissor.extent = fbSize;
     builder.pipelineLayout = meshPipelineLayout;
-    meshPipeline = builder.build_pipeline(ctx->device, renderPass);
+    meshPipeline = builder.build_pipeline(ctx->device, swapchainImageFormat, depthImageFormat);
 
     resourceJanitor.push_back([=](){ vkDestroyPipeline(ctx->device, meshPipeline, nullptr); });
 

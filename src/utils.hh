@@ -36,10 +36,20 @@ Path shaderdir();
 Path get_asset_path(std::string_view file);
 Path get_shader_path(std::string_view file);
 
+void image_layout_transition(VkCommandBuffer cmd,
+                             VkImage image,
+                             VkImageAspectFlags aspectFlags,
+                             VkPipelineStageFlags2 srcStageFlags,
+                             VkAccessFlags srcAccessFlags,
+                             VkPipelineStageFlags2 dstStageFlags,
+                             VkAccessFlags dstAccessFlags,
+                             VkImageLayout oldLayout,
+                             VkImageLayout newLayout);
+
 struct PipelineBuilder
 {
     void use_default_ff();
-    VkPipeline build_pipeline(VkDevice device, VkRenderPass pass);
+    VkPipeline build_pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat);
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
     VkPipelineVertexInputStateCreateInfo vertexInputInfo;
     VkPipelineInputAssemblyStateCreateInfo inputAssembly;

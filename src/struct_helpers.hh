@@ -115,19 +115,6 @@ inline VkCommandBufferBeginInfo command_buffer_begin_info(VkCommandBufferUsageFl
     return info;
 }
 
-inline VkFramebufferCreateInfo framebuffer_create_info(VkRenderPass renderPass, VkExtent2D extent)
-{
-    VkFramebufferCreateInfo info = {};
-    info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-    info.pNext = nullptr;
-    info.renderPass = renderPass;
-    info.attachmentCount = 1;
-    info.width = extent.width;
-    info.height = extent.height;
-    info.layers = 1;
-    return info;
-}
-
 inline VkFenceCreateInfo fence_create_info(VkFenceCreateFlags flags = 0)
 {
     VkFenceCreateInfo info = {};
@@ -143,21 +130,6 @@ inline VkSemaphoreCreateInfo semaphore_create_info(VkSemaphoreCreateFlags flags 
     info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
     info.pNext = nullptr;
     info.flags = flags;
-    return info;
-}
-
-inline VkRenderPassBeginInfo renderpass_begin_info(VkRenderPass renderPass, VkExtent2D windowExtent, VkFramebuffer framebuffer)
-{
-    VkRenderPassBeginInfo info = {};
-    info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    info.pNext = nullptr;
-    info.renderPass = renderPass;
-    info.renderArea.offset.x = 0;
-    info.renderArea.offset.y = 0;
-    info.renderArea.extent = windowExtent;
-    info.clearValueCount = 1;
-    info.pClearValues = nullptr;
-    info.framebuffer = framebuffer;
     return info;
 }
 

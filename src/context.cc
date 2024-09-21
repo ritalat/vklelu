@@ -12,7 +12,7 @@
 #include <cstdio>
 #include <stdexcept>
 
-#define REQUIRED_VK_VERSION_MINOR 0
+#define REQUIRED_VK_VERSION_MINOR 3
 
 VulkanContext::VulkanContext(SDL_Window *window):
     instance(VK_NULL_HANDLE),
@@ -44,6 +44,7 @@ VulkanContext::VulkanContext(SDL_Window *window):
     if (!inst_ret) {
         throw std::runtime_error("Failed to create Vulkan instance. Error: " + inst_ret.error().message());
     }
+
     vkb::Instance vkb_inst = inst_ret.value();
     instance = vkb_inst.instance;
 #if !defined(NDEBUG)
@@ -54,22 +55,38 @@ VulkanContext::VulkanContext(SDL_Window *window):
         throw std::runtime_error("Failed to create Vulkan surface");
     }
 
+    VkPhysicalDeviceVulkan13Features required13Features = {};
+    required13Features.dynamicRendering = true;
+    required13Features.synchronization2 = true;
+
     vkb::PhysicalDeviceSelector selector{ vkb_inst };
     auto phys_ret = selector.set_surface(surface)
         .set_minimum_version(1, REQUIRED_VK_VERSION_MINOR)
+        .set_required_features_13(required13Features)
         .select();
     if (!phys_ret) {
         throw std::runtime_error("Failed to select Vulkan physical device. Error: " + phys_ret.error().message());
     }
+
     vkb::PhysicalDevice vkb_phys = phys_ret.value();
     physicalDevice = vkb_phys.physical_device;
     physicalDeviceProperties = vkb_phys.properties;
+
+    VkPhysicalDeviceDriverProperties driverProps = {};
+    driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+
+    VkPhysicalDeviceProperties2 devProps2 = {};
+    devProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+    devProps2.pNext = &driverProps;
+
+    vkGetPhysicalDeviceProperties2(physicalDevice, &devProps2);
 
     vkb::DeviceBuilder deviceBuilder{ vkb_phys };
     auto dev_ret = deviceBuilder.build();
     if (!dev_ret) {
         throw std::runtime_error("Failed to create Vulkan device. Error: " + dev_ret.error().message());
     }
+
     vkb::Device vkb_device = dev_ret.value();
     device = vkb_device.device;
 
@@ -77,8 +94,17 @@ VulkanContext::VulkanContext(SDL_Window *window):
     if (!graphics_queue_ret) {
         throw std::runtime_error("Failed to get graphics queue. Error: " + graphics_queue_ret.error().message());
     }
+
     graphicsQueue = graphics_queue_ret.value();
     graphicsQueueFamily = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
+
+    fprintf(stderr, "Selected Vulkan device:\n");
+    fprintf(stderr, "  Device name:\t%s\n", devProps2.properties.deviceName);
+    fprintf(stderr, "  Driver name:\t%s\n", driverProps.driverName);
+    fprintf(stderr, "  Driver info:\t%s\n", driverProps.driverInfo);
+    fprintf(stderr, "  API version:\t%d.%d.%d\n", VK_API_VERSION_MAJOR(devProps2.properties.apiVersion),
+                                                  VK_API_VERSION_MINOR(devProps2.properties.apiVersion),
+                                                  VK_API_VERSION_PATCH(devProps2.properties.apiVersion));
 
     VmaAllocatorCreateInfo allocatorInfo = {};
     allocatorInfo.instance = instance;

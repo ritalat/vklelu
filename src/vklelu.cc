@@ -34,6 +34,18 @@ VKlelu::VKlelu(int argc, char *argv[]):
     (void)argc;
     (void)argv;
 
+    fprintf(stderr, "Launching VKlelu\n"
+                    "================\n");
+
+    SDL_version compiled;
+    SDL_version linked;
+    SDL_VERSION(&compiled);
+    SDL_GetVersion(&linked);
+    fprintf(stderr, "Compiled with:\tSDL %u.%u.%u\n",
+            compiled.major, compiled.minor, compiled.patch);
+    fprintf(stderr, "Loaded:\t\tSDL %u.%u.%u\n",
+            linked.major, linked.minor, linked.patch);
+
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         throw std::runtime_error("Failed to init SDL");
     }
@@ -53,11 +65,11 @@ VKlelu::VKlelu(int argc, char *argv[]):
     fbSize.width = (uint32_t)drawableWidth;
     fbSize.height = (uint32_t)drawableHeight;
 
-    fprintf(stderr, "Window size: %ux%u\n", WINDOW_WIDTH, WINDOW_HEIGHT);
-    fprintf(stderr, "Drawable size: %ux%u\n", fbSize.width, fbSize.height);
+    fprintf(stderr, "Window size:\t%ux%u\n", WINDOW_WIDTH, WINDOW_HEIGHT);
+    fprintf(stderr, "Drawable size:\t%ux%u\n", fbSize.width, fbSize.height);
 
-    fprintf(stderr, "Asset directory: %s\n", cpath(assetdir()));
-    fprintf(stderr, "Shader directory: %s\n", cpath(shaderdir()));
+    fprintf(stderr, "Asset directory:\t%s\n", cpath(assetdir()));
+    fprintf(stderr, "Shader directory:\t%s\n", cpath(shaderdir()));
 }
 
 VKlelu::~VKlelu()
@@ -129,23 +141,64 @@ void VKlelu::draw()
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-    VkClearValue clearValue;
-    clearValue.color = { { 0.0f, 0.0f, 0.5f, 1.0f } };
+    image_layout_transition(cmd, swapchainImages[swapchainImageIndex],
+                                 VK_IMAGE_ASPECT_COLOR_BIT,
+                                 VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                 0,
+                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                                 VK_IMAGE_LAYOUT_UNDEFINED,
+                                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    VkClearValue depthClearValue;
-    depthClearValue.depthStencil.depth = 1.0f;
+    image_layout_transition(cmd, depthImage.image->image,
+                                 VK_IMAGE_ASPECT_DEPTH_BIT,
+                                 VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                                 0,
+                                 VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+                                 | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                                 VK_IMAGE_LAYOUT_UNDEFINED,
+                                 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
-    VkClearValue clearValues[2] = { clearValue, depthClearValue };
+    VkRenderingAttachmentInfo colorInfo = {};
+    colorInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    colorInfo.imageView = swapchainImageViews[swapchainImageIndex];
+    colorInfo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    colorInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    colorInfo.clearValue.color = { { 0.0f, 0.0f, 0.5f, 1.0f } };
 
-    VkRenderPassBeginInfo rpInfo = renderpass_begin_info(renderPass, fbSize, framebuffers[swapchainImageIndex]);
-    rpInfo.clearValueCount = 2;
-    rpInfo.pClearValues = &clearValues[0];
+    VkRenderingAttachmentInfo depthInfo = {};
+    depthInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
+    depthInfo.imageView = depthImage.imageView;
+    depthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depthInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    depthInfo.clearValue.depthStencil.depth = 1.0f;
 
-    vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+    VkRenderingInfo renderInfo = {};
+    renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
+    renderInfo.renderArea.extent = fbSize;
+    renderInfo.renderArea.offset = { 0, 0 };
+    renderInfo.layerCount = 1;
+    renderInfo.colorAttachmentCount = 1;
+    renderInfo.pColorAttachments = &colorInfo;
+    renderInfo.pDepthAttachment = &depthInfo;
+
+    vkCmdBeginRendering(cmd, &renderInfo);
 
     draw_objects(cmd);
 
-    vkCmdEndRenderPass(cmd);
+    vkCmdEndRendering(cmd);
+
+    image_layout_transition(cmd, swapchainImages[swapchainImageIndex],
+                                 VK_IMAGE_ASPECT_COLOR_BIT,
+                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                                 VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+                                 0,
+                                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
