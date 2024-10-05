@@ -8,8 +8,8 @@
 
 #include "glm/glm.hpp"
 #include "glm/gtc/matrix_transform.hpp"
-#include "SDL.h"
-#include "SDL_vulkan.h"
+#include "SDL3/SDL.h"
+#include "SDL3/SDL_vulkan.h"
 #include "vulkan/vulkan.h"
 
 #include <array>
@@ -37,23 +37,21 @@ VKlelu::VKlelu(int argc, char *argv[]):
     fprintf(stderr, "Launching VKlelu\n"
                     "================\n");
 
-    SDL_version compiled;
-    SDL_version linked;
-    SDL_VERSION(&compiled);
-    SDL_GetVersion(&linked);
+    int linked = SDL_GetVersion();
     fprintf(stderr, "Compiled with:\tSDL %u.%u.%u\n",
-            compiled.major, compiled.minor, compiled.patch);
+            SDL_MAJOR_VERSION, SDL_MINOR_VERSION, SDL_MICRO_VERSION);
     fprintf(stderr, "Loaded:\t\tSDL %u.%u.%u\n",
-            linked.major, linked.minor, linked.patch);
+            SDL_VERSIONNUM_MAJOR(linked),
+            SDL_VERSIONNUM_MINOR(linked),
+            SDL_VERSIONNUM_MICRO(linked));
 
-    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
         throw std::runtime_error("Failed to init SDL");
     }
 
     m_window = SDL_CreateWindow("VKlelu",
-                                SDL_WINDOWPOS_UNDEFINED,
-                                SDL_WINDOWPOS_UNDEFINED,
-                                WINDOW_WIDTH, WINDOW_HEIGHT,
+                                WINDOW_WIDTH,
+                                WINDOW_HEIGHT,
                                 SDL_WINDOW_VULKAN);
     if (!m_window) {
         throw std::runtime_error("Failed to create SDL window");
@@ -61,7 +59,7 @@ VKlelu::VKlelu(int argc, char *argv[]):
 
     int drawableWidth;
     int drawableHeight;
-    SDL_Vulkan_GetDrawableSize(m_window, &drawableWidth, &drawableHeight);
+    SDL_GetWindowSizeInPixels(m_window, &drawableWidth, &drawableHeight);
     m_fbSize.width = (uint32_t)drawableWidth;
     m_fbSize.height = (uint32_t)drawableHeight;
 
@@ -97,11 +95,11 @@ int VKlelu::run()
     while (!quit) {
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
-                case SDL_QUIT:
+                case SDL_EVENT_QUIT:
                     quit = true;
                     break;
-                case SDL_KEYUP:
-                    if (SDL_SCANCODE_ESCAPE == event.key.keysym.scancode)
+                case SDL_EVENT_KEY_UP:
+                    if (SDL_SCANCODE_ESCAPE == event.key.scancode)
                         quit = true;
                     break;
                 default:

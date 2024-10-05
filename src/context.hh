@@ -2,7 +2,7 @@
 
 #include "memory.hh"
 
-#include "SDL.h"
+#include "SDL3/SDL.h"
 #include "vk_mem_alloc.h"
 #include "vulkan/vulkan.h"
 
