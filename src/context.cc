@@ -2,8 +2,8 @@
 
 #include "utils.hh"
 
-#include "SDL.h"
-#include "SDL_vulkan.h"
+#include "SDL3/SDL.h"
+#include "SDL3/SDL_vulkan.h"
 #include "vk_mem_alloc.h"
 #include "VkBootstrap.h"
 #include "vulkan/vulkan.h"
@@ -51,7 +51,7 @@ VulkanContext::VulkanContext(SDL_Window *window):
     debugMessenger = vkb_inst.debug_messenger;
 #endif
 
-    if (!SDL_Vulkan_CreateSurface(window, instance, &surface)) {
+    if (!SDL_Vulkan_CreateSurface(window, instance, NULL, &surface)) {
         throw std::runtime_error("Failed to create Vulkan surface");
     }
 

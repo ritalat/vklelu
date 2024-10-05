@@ -1,8 +1,7 @@
 #include "vklelu.hh"
 
-#if defined(WIN32) && defined(NDEBUG)
-#include "SDL.h"
-#endif
+#include "SDL3/SDL.h"
+#include "SDL3/SDL_main.h"
 
 #include <cstddef>
 #include <cstdio>

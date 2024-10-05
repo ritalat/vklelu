@@ -86,13 +86,12 @@ endif()
 
 add_dependencies(vklelu Shaders)
 target_link_libraries(vklelu Vulkan::Vulkan
-                             SDL2::SDL2
-                             SDL2::SDL2main
+                             SDL3::SDL3
                              glm::glm
                              tinyobjloader
                              vk-bootstrap::vk-bootstrap
                              single_header)
 
-install(TARGETS vklelu SDL2 RUNTIME DESTINATION ".")
+install(TARGETS vklelu SDL3-shared RUNTIME DESTINATION ".")
 
 install(DIRECTORY assets shaders DESTINATION ".")
