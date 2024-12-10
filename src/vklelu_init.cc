@@ -28,7 +28,7 @@ void VKlelu::init_vulkan()
 
 void VKlelu::init_swapchain()
 {
-    vkb::SwapchainBuilder swapchainBuilder{ ctx->physicalDevice, ctx->device, ctx->surface };
+    vkb::SwapchainBuilder swapchainBuilder{ ctx->physical_device(), ctx->device(), ctx->surface() };
     auto swap_ret = swapchainBuilder.use_default_format_selection()
                                     .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
                                     .set_desired_extent(fbSize.width, fbSize.height)
@@ -43,9 +43,9 @@ void VKlelu::init_swapchain()
     swapchainImages = vkb_swapchain.get_images().value();
     swapchainImageViews = vkb_swapchain.get_image_views().value();
 
-    resourceJanitor.push_back([=](){ vkDestroySwapchainKHR(ctx->device, swapchain, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroySwapchainKHR(ctx->device(), swapchain, nullptr); });
     for (VkImageView swapView : swapchainImageViews) {
-        resourceJanitor.push_back([=](){ vkDestroyImageView(ctx->device, swapView, nullptr); });
+        resourceJanitor.push_back([=](){ vkDestroyImageView(ctx->device(), swapView, nullptr); });
     }
 
     VkExtent3D imageExtent = {
@@ -55,7 +55,7 @@ void VKlelu::init_swapchain()
     };
     depthImageFormat = VK_FORMAT_D32_SFLOAT;
 
-    depthImage.image = std::make_unique<ImageAllocation>(ctx->allocator, imageExtent, depthImageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    depthImage.image = ctx->allocate_image(imageExtent, depthImageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
     depthImage.imageView = depthImage.image->create_image_view(depthImageFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 
     fprintf(stderr, "Swapchain initialized\n");
@@ -64,22 +64,22 @@ void VKlelu::init_swapchain()
 void VKlelu::init_commands()
 {
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        VkCommandPoolCreateInfo commandPoolInfo = command_pool_create_info(ctx->graphicsQueueFamily, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
-        VK_CHECK(vkCreateCommandPool(ctx->device, &commandPoolInfo, nullptr, &frameData[i].commandPool));
+        VkCommandPoolCreateInfo commandPoolInfo = command_pool_create_info(ctx->graphics_queue_family(), VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+        VK_CHECK(vkCreateCommandPool(ctx->device(), &commandPoolInfo, nullptr, &frameData[i].commandPool));
 
         VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(frameData[i].commandPool, 1);
-        VK_CHECK(vkAllocateCommandBuffers(ctx->device, &cmdAllocInfo, &frameData[i].mainCommandBuffer));
+        VK_CHECK(vkAllocateCommandBuffers(ctx->device(), &cmdAllocInfo, &frameData[i].mainCommandBuffer));
 
-        resourceJanitor.push_back([=](){ vkDestroyCommandPool(ctx->device, frameData[i].commandPool, nullptr); });
+        resourceJanitor.push_back([=](){ vkDestroyCommandPool(ctx->device(), frameData[i].commandPool, nullptr); });
     }
 
-    VkCommandPoolCreateInfo uploadPoolInfo = command_pool_create_info(ctx->graphicsQueueFamily);
-    VK_CHECK(vkCreateCommandPool(ctx->device, &uploadPoolInfo, nullptr, &uploadContext.commandPool));
+    VkCommandPoolCreateInfo uploadPoolInfo = command_pool_create_info(ctx->graphics_queue_family());
+    VK_CHECK(vkCreateCommandPool(ctx->device(), &uploadPoolInfo, nullptr, &uploadContext.commandPool));
 
     VkCommandBufferAllocateInfo cmdAllocInfo = command_buffer_allocate_info(uploadContext.commandPool, 1);
-    VK_CHECK(vkAllocateCommandBuffers(ctx->device, &cmdAllocInfo, &uploadContext.commandBuffer));
+    VK_CHECK(vkAllocateCommandBuffers(ctx->device(), &cmdAllocInfo, &uploadContext.commandBuffer));
 
-    resourceJanitor.push_back([=](){ vkDestroyCommandPool(ctx->device, uploadContext.commandPool, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyCommandPool(ctx->device(), uploadContext.commandPool, nullptr); });
 
     fprintf(stderr, "Command pool initialized\n");
 }
@@ -88,30 +88,30 @@ void VKlelu::init_sync_structures()
 {
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         VkFenceCreateInfo fenceCreateInfo = fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
-        VK_CHECK(vkCreateFence(ctx->device, &fenceCreateInfo, nullptr, &frameData[i].renderFence));
+        VK_CHECK(vkCreateFence(ctx->device(), &fenceCreateInfo, nullptr, &frameData[i].renderFence));
 
         VkSemaphoreCreateInfo semaphoreCreateInfo = semaphore_create_info();
-        VK_CHECK(vkCreateSemaphore(ctx->device, &semaphoreCreateInfo, nullptr, &frameData[i].imageAcquiredSemaphore));
-        VK_CHECK(vkCreateSemaphore(ctx->device, &semaphoreCreateInfo, nullptr, &frameData[i].renderSemaphore));
+        VK_CHECK(vkCreateSemaphore(ctx->device(), &semaphoreCreateInfo, nullptr, &frameData[i].imageAcquiredSemaphore));
+        VK_CHECK(vkCreateSemaphore(ctx->device(), &semaphoreCreateInfo, nullptr, &frameData[i].renderSemaphore));
 
         resourceJanitor.push_back([=](){
-            vkDestroyFence(ctx->device, frameData[i].renderFence, nullptr);
-            vkDestroySemaphore(ctx->device, frameData[i].imageAcquiredSemaphore, nullptr);
-            vkDestroySemaphore(ctx->device, frameData[i].renderSemaphore, nullptr);
+            vkDestroyFence(ctx->device(), frameData[i].renderFence, nullptr);
+            vkDestroySemaphore(ctx->device(), frameData[i].imageAcquiredSemaphore, nullptr);
+            vkDestroySemaphore(ctx->device(), frameData[i].renderSemaphore, nullptr);
         });
     }
 
     VkFenceCreateInfo uploadFenceInfo = fence_create_info();
-    VK_CHECK(vkCreateFence(ctx->device, &uploadFenceInfo, nullptr, &uploadContext.uploadFence));
-    resourceJanitor.push_back([=](){ vkDestroyFence(ctx->device, uploadContext.uploadFence, nullptr); });
+    VK_CHECK(vkCreateFence(ctx->device(), &uploadFenceInfo, nullptr, &uploadContext.uploadFence));
+    resourceJanitor.push_back([=](){ vkDestroyFence(ctx->device(), uploadContext.uploadFence, nullptr); });
 
     fprintf(stderr, "Sync structures initialized\n");
 }
 
 void VKlelu::init_descriptors()
 {
-    size_t sceneParamBufferSize = MAX_FRAMES_IN_FLIGHT * pad_uniform_buffer_size(sizeof(SceneData));
-    sceneParameterBuffer = std::make_unique<BufferAllocation>(ctx->allocator, sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+    size_t sceneParamBufferSize = MAX_FRAMES_IN_FLIGHT * sizeof(SceneData);
+    sceneParameterBuffer = ctx->allocate_buffer(sceneParamBufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
     sceneParameterBufferMapping = sceneParameterBuffer->map();
 
     VkDescriptorSetLayoutBinding camBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
@@ -125,9 +125,9 @@ void VKlelu::init_descriptors()
     setInfo.bindingCount = 2;
     setInfo.pBindings = bindings;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(ctx->device, &setInfo, nullptr, &globalSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(ctx->device(), &setInfo, nullptr, &globalSetLayout));
 
-    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device, globalSetLayout, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device(), globalSetLayout, nullptr); });
 
     VkDescriptorSetLayoutBinding objectBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT, 0);
 
@@ -138,9 +138,9 @@ void VKlelu::init_descriptors()
     set2Info.bindingCount = 1;
     set2Info.pBindings = &objectBind;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(ctx->device, &set2Info, nullptr, &objectSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(ctx->device(), &set2Info, nullptr, &objectSetLayout));
 
-    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device, objectSetLayout, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device(), objectSetLayout, nullptr); });
 
     VkDescriptorSetLayoutBinding textureBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0);
 
@@ -151,9 +151,9 @@ void VKlelu::init_descriptors()
     set3Info.flags = 0;
     set3Info.pBindings = &textureBind;
 
-    VK_CHECK(vkCreateDescriptorSetLayout(ctx->device, &set3Info, nullptr, &singleTextureSetLayout));
+    VK_CHECK(vkCreateDescriptorSetLayout(ctx->device(), &set3Info, nullptr, &singleTextureSetLayout));
 
-    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device, singleTextureSetLayout, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device(), singleTextureSetLayout, nullptr); });
 
     std::vector<VkDescriptorPoolSize> sizes = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 },
                                                 { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 10 },
@@ -168,14 +168,14 @@ void VKlelu::init_descriptors()
     poolInfo.poolSizeCount = static_cast<uint32_t>(sizes.size());
     poolInfo.pPoolSizes = sizes.data();
 
-    VK_CHECK(vkCreateDescriptorPool(ctx->device, &poolInfo, nullptr, &descriptorPool));
+    VK_CHECK(vkCreateDescriptorPool(ctx->device(), &poolInfo, nullptr, &descriptorPool));
 
-    resourceJanitor.push_back([=](){ vkDestroyDescriptorPool(ctx->device, descriptorPool, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyDescriptorPool(ctx->device(), descriptorPool, nullptr); });
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        frameData[i].cameraBuffer = std::make_unique<BufferAllocation>(ctx->allocator, sizeof(CameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        frameData[i].cameraBuffer = ctx->allocate_buffer(sizeof(CameraData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
         frameData[i].cameraBufferMapping = frameData[i].cameraBuffer->map();
-        frameData[i].objectBuffer = std::make_unique<BufferAllocation>(ctx->allocator, sizeof(ObjectData) * MAX_OBJECTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
+        frameData[i].objectBuffer = ctx->allocate_buffer(sizeof(ObjectData) * MAX_OBJECTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_CPU_TO_GPU);
         frameData[i].objectBufferMapping = frameData[i].objectBuffer->map();
 
         VkDescriptorSetAllocateInfo allocInfo = {};
@@ -184,7 +184,7 @@ void VKlelu::init_descriptors()
         allocInfo.descriptorPool = descriptorPool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &globalSetLayout;
-        VK_CHECK(vkAllocateDescriptorSets(ctx->device, &allocInfo, &frameData[i].globalDescriptor));
+        VK_CHECK(vkAllocateDescriptorSets(ctx->device(), &allocInfo, &frameData[i].globalDescriptor));
 
         VkDescriptorSetAllocateInfo objAllocInfo = {};
         objAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
@@ -192,20 +192,20 @@ void VKlelu::init_descriptors()
         objAllocInfo.descriptorPool = descriptorPool;
         objAllocInfo.descriptorSetCount = 1;
         objAllocInfo.pSetLayouts = &objectSetLayout;
-        VK_CHECK(vkAllocateDescriptorSets(ctx->device, &objAllocInfo, &frameData[i].objectDescriptor));
+        VK_CHECK(vkAllocateDescriptorSets(ctx->device(), &objAllocInfo, &frameData[i].objectDescriptor));
 
         VkDescriptorBufferInfo camInfo = {};
-        camInfo.buffer = frameData[i].cameraBuffer->buffer;
+        camInfo.buffer = frameData[i].cameraBuffer->buffer();
         camInfo.offset = 0;
         camInfo.range = sizeof(CameraData);
 
         VkDescriptorBufferInfo sceneInfo = {};
-        sceneInfo.buffer = sceneParameterBuffer->buffer;
+        sceneInfo.buffer = sceneParameterBuffer->buffer();
         sceneInfo.offset = 0;
         sceneInfo.range = sizeof(SceneData);
 
         VkDescriptorBufferInfo objInfo = {};
-        objInfo.buffer = frameData[i].objectBuffer->buffer;
+        objInfo.buffer = frameData[i].objectBuffer->buffer();
         objInfo.offset = 0;
         objInfo.range = sizeof(ObjectData) * MAX_OBJECTS;
 
@@ -213,7 +213,7 @@ void VKlelu::init_descriptors()
         VkWriteDescriptorSet sceneWrite = write_descriptor_buffer(VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, frameData[i].globalDescriptor, &sceneInfo, 1);
         VkWriteDescriptorSet objWrite = write_descriptor_buffer(VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, frameData[i].objectDescriptor, &objInfo, 0);
         VkWriteDescriptorSet writeSet[3] = { camWrite, sceneWrite, objWrite };
-        vkUpdateDescriptorSets(ctx->device, 3, writeSet, 0 , nullptr);
+        vkUpdateDescriptorSets(ctx->device(), 3, writeSet, 0 , nullptr);
     }
 
     fprintf(stderr, "Descriptors initialized\n");
@@ -241,9 +241,9 @@ void VKlelu::init_pipelines()
     pipelineLayoutInfo.pushConstantRangeCount = 1;
     pipelineLayoutInfo.setLayoutCount = 3;
     pipelineLayoutInfo.pSetLayouts = setLayouts;
-    VK_CHECK(vkCreatePipelineLayout(ctx->device, &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
+    VK_CHECK(vkCreatePipelineLayout(ctx->device(), &pipelineLayoutInfo, nullptr, &meshPipelineLayout));
 
-    resourceJanitor.push_back([=](){ vkDestroyPipelineLayout(ctx->device, meshPipelineLayout, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyPipelineLayout(ctx->device(), meshPipelineLayout, nullptr); });
 
     VertexInputDescription vertexDescription = Vertex::get_description();
 
@@ -265,12 +265,12 @@ void VKlelu::init_pipelines()
     builder.scissor.offset = { 0, 0 };
     builder.scissor.extent = fbSize;
     builder.pipelineLayout = meshPipelineLayout;
-    meshPipeline = builder.build_pipeline(ctx->device, swapchainImageFormat, depthImageFormat);
+    meshPipeline = builder.build_pipeline(ctx->device(), swapchainImageFormat, depthImageFormat);
 
-    resourceJanitor.push_back([=](){ vkDestroyPipeline(ctx->device, meshPipeline, nullptr); });
+    resourceJanitor.push_back([=](){ vkDestroyPipeline(ctx->device(), meshPipeline, nullptr); });
 
-    vkDestroyShaderModule(ctx->device, vertShader, nullptr);
-    vkDestroyShaderModule(ctx->device, fragShader, nullptr);
+    vkDestroyShaderModule(ctx->device(), vertShader, nullptr);
+    vkDestroyShaderModule(ctx->device(), fragShader, nullptr);
 
     if (!meshPipeline)
         throw std::runtime_error("Failed to create graphics pipeline \"mesh\"");

@@ -7,14 +7,12 @@
 #include "vulkan/vulkan.h"
 
 BufferAllocation::BufferAllocation(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage):
-    buffer(VK_NULL_HANDLE),
-    allocation(VK_NULL_HANDLE),
-    allocator(VK_NULL_HANDLE),
-    mapped(false),
-    mapping(nullptr)
+    m_buffer(VK_NULL_HANDLE),
+    m_allocation(VK_NULL_HANDLE),
+    m_allocator(allocator),
+    m_mapped(false),
+    m_mapping(nullptr)
 {
-    this->allocator = allocator;
-
     VkBufferCreateInfo bufferInfo = {};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.pNext = nullptr;
@@ -24,45 +22,48 @@ BufferAllocation::BufferAllocation(VmaAllocator allocator, size_t size, VkBuffer
     VmaAllocationCreateInfo allocInfo = {};
     allocInfo.usage = memoryUsage;
 
-    VK_CHECK(vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &buffer, &allocation, nullptr));
+    VK_CHECK(vmaCreateBuffer(m_allocator, &bufferInfo, &allocInfo, &m_buffer, &m_allocation, nullptr));
 }
 
 BufferAllocation::~BufferAllocation()
 {
-    if (mapped)
+    if (m_mapped)
         unmap();
-    vmaDestroyBuffer(allocator, buffer, allocation);
+    vmaDestroyBuffer(m_allocator, m_buffer, m_allocation);
+}
+
+VkBuffer BufferAllocation::buffer()
+{
+    return m_buffer;
 }
 
 void *BufferAllocation::map()
 {
-    if (!mapped) {
-        VK_CHECK(vmaMapMemory(allocator, allocation, &mapping));
-        mapped = true;
+    if (!m_mapped) {
+        VK_CHECK(vmaMapMemory(m_allocator, m_allocation, &m_mapping));
+        m_mapped = true;
     }
-    return mapping;
+    return m_mapping;
 }
 
 void BufferAllocation::unmap()
 {
-    if (mapped) {
-        vmaUnmapMemory(allocator, allocation);
-        mapped = false;
-        mapping = nullptr;
+    if (m_mapped) {
+        vmaUnmapMemory(m_allocator, m_allocation);
+        m_mapped = false;
+        m_mapping = nullptr;
     }
 }
 
 ImageAllocation::ImageAllocation(VmaAllocator allocator, VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage):
-    image(VK_NULL_HANDLE),
-    allocation(VK_NULL_HANDLE),
-    allocator(VK_NULL_HANDLE),
-    device(VK_NULL_HANDLE)
+    m_image(VK_NULL_HANDLE),
+    m_allocation(VK_NULL_HANDLE),
+    m_allocator(allocator),
+    m_device(VK_NULL_HANDLE)
 {
-    this->allocator = allocator;
-
     VmaAllocatorInfo allocatorInfo = {};
-    vmaGetAllocatorInfo(this->allocator, &allocatorInfo);
-    this->device = allocatorInfo.device;
+    vmaGetAllocatorInfo(m_allocator, &allocatorInfo);
+    m_device = allocatorInfo.device;
 
     VkImageCreateInfo imgInfo = image_create_info(format, usage, extent);
     imgInfo.samples = samples;
@@ -71,24 +72,29 @@ ImageAllocation::ImageAllocation(VmaAllocator allocator, VkExtent3D extent, VkFo
     imgAllocInfo.usage = memoryUsage;
     imgAllocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-    VK_CHECK(vmaCreateImage(allocator, &imgInfo, &imgAllocInfo, &image, &allocation, nullptr));
+    VK_CHECK(vmaCreateImage(m_allocator, &imgInfo, &imgAllocInfo, &m_image, &m_allocation, nullptr));
 }
 
 ImageAllocation::~ImageAllocation()
 {
-    if (device) {
-        for (VkImageView imageView : imageViews)
-            vkDestroyImageView(device, imageView, nullptr);
+    if (m_device) {
+        for (VkImageView imageView : m_imageViews)
+            vkDestroyImageView(m_device, imageView, nullptr);
     }
-    vmaDestroyImage(allocator, image, allocation);
+    vmaDestroyImage(m_allocator, m_image, m_allocation);
+}
+
+VkImage ImageAllocation::image()
+{
+    return m_image;
 }
 
 VkImageView ImageAllocation::create_image_view(VkFormat format, VkImageAspectFlags aspectFlags)
 {
-    VkImageViewCreateInfo viewInfo = imageview_create_info(format, image, aspectFlags);
+    VkImageViewCreateInfo viewInfo = imageview_create_info(format, m_image, aspectFlags);
     VkImageView imageView;
-    VK_CHECK(vkCreateImageView(this->device, &viewInfo, nullptr, &imageView));
+    VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &imageView));
 
-    imageViews.push_back(imageView);
+    m_imageViews.push_back(imageView);
     return imageView;
 }

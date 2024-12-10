@@ -75,7 +75,7 @@ VKlelu::VKlelu(int argc, char *argv[]):
 VKlelu::~VKlelu()
 {
     if (ctx)
-        vkDeviceWaitIdle(ctx->device);
+        vkDeviceWaitIdle(ctx->device());
 
     for (auto fn = resourceJanitor.rbegin(); fn != resourceJanitor.rend(); ++fn)
         (*fn)();
@@ -127,11 +127,11 @@ void VKlelu::draw()
 {
     FrameData &currentFrame = get_current_frame();
 
-    VK_CHECK(vkWaitForFences(ctx->device, 1, &currentFrame.renderFence, true, NS_IN_SEC));
-    VK_CHECK(vkResetFences(ctx->device, 1, &currentFrame.renderFence));
+    VK_CHECK(vkWaitForFences(ctx->device(), 1, &currentFrame.renderFence, true, NS_IN_SEC));
+    VK_CHECK(vkResetFences(ctx->device(), 1, &currentFrame.renderFence));
 
     uint32_t swapchainImageIndex;
-    VK_CHECK(vkAcquireNextImageKHR(ctx->device, swapchain, NS_IN_SEC, currentFrame.imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
+    VK_CHECK(vkAcquireNextImageKHR(ctx->device(), swapchain, NS_IN_SEC, currentFrame.imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
 
     VK_CHECK(vkResetCommandBuffer(currentFrame.mainCommandBuffer, 0));
 
@@ -150,7 +150,7 @@ void VKlelu::draw()
                                  VK_IMAGE_LAYOUT_UNDEFINED,
                                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    image_layout_transition(cmd, depthImage.image->image,
+    image_layout_transition(cmd, depthImage.image->image(),
                                  VK_IMAGE_ASPECT_DEPTH_BIT,
                                  VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
                                  0,
@@ -211,7 +211,7 @@ void VKlelu::draw()
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &currentFrame.renderSemaphore;
 
-    VK_CHECK(vkQueueSubmit(ctx->graphicsQueue, 1, &submit, currentFrame.renderFence));
+    VK_CHECK(vkQueueSubmit(ctx->graphics_queue(), 1, &submit, currentFrame.renderFence));
 
     VkPresentInfoKHR presentInfo = present_info();
     presentInfo.swapchainCount = 1;
@@ -220,7 +220,7 @@ void VKlelu::draw()
     presentInfo.pWaitSemaphores = &currentFrame.renderSemaphore;
     presentInfo.pImageIndices = &swapchainImageIndex;
 
-    VK_CHECK(vkQueuePresentKHR(ctx->graphicsQueue, &presentInfo));
+    VK_CHECK(vkQueuePresentKHR(ctx->graphics_queue(), &presentInfo));
 
     ++frameCount;
 }
@@ -245,7 +245,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
 
     char *sceneData = (char *)sceneParameterBufferMapping;
     int frameIndex = frameCount % MAX_FRAMES_IN_FLIGHT;
-    sceneData += pad_uniform_buffer_size(sizeof(SceneData)) * frameIndex;
+    sceneData += sizeof(SceneData) * frameIndex;
     memcpy(sceneData, &sceneParameters, sizeof(SceneData));
 
     void *objData = currentFrame.objectBufferMapping;;
@@ -265,7 +265,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
         if (himmeli.material != lastMaterial) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipeline);
             lastMaterial = himmeli.material;
-            uint32_t uniformOffset = static_cast<uint32_t>(pad_uniform_buffer_size(sizeof(SceneData))) * frameIndex;
+            uint32_t uniformOffset = static_cast<uint32_t>(sizeof(SceneData)) * frameIndex;
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipelineLayout, 0, 1, &currentFrame.globalDescriptor, 1, &uniformOffset);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, himmeli.material->pipelineLayout, 1, 1, &currentFrame.objectDescriptor, 0, nullptr);
 
@@ -279,8 +279,9 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
 
         if (himmeli.mesh != lastMesh) {
             VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cmd, 0, 1, &himmeli.mesh->vertexBuffer->buffer, &offset);
-            vkCmdBindIndexBuffer(cmd, himmeli.mesh->indexBuffer->buffer, 0, VK_INDEX_TYPE_UINT32);
+            VkBuffer vertexBuffer = himmeli.mesh->vertexBuffer->buffer();
+            vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer, &offset);
+            vkCmdBindIndexBuffer(cmd, himmeli.mesh->indexBuffer->buffer(), 0, VK_INDEX_TYPE_UINT32);
             lastMesh = himmeli.mesh;
         }
         vkCmdDrawIndexed(cmd, himmeli.mesh->numIndices, 1, 0, 0, 0);
@@ -318,11 +319,11 @@ void VKlelu::init_scene()
     allocInfo.descriptorPool = descriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &singleTextureSetLayout;
-    VK_CHECK(vkAllocateDescriptorSets(ctx->device, &allocInfo, &monkeyMat->textureSet));
+    VK_CHECK(vkAllocateDescriptorSets(ctx->device(), &allocInfo, &monkeyMat->textureSet));
 
     VkSamplerCreateInfo samplerInfo = sampler_create_info(VK_FILTER_LINEAR);
-    VK_CHECK(vkCreateSampler(ctx->device, &samplerInfo, nullptr, &linearSampler));
-    resourceJanitor.push_back([=](){ vkDestroySampler(ctx->device, linearSampler, nullptr); });
+    VK_CHECK(vkCreateSampler(ctx->device(), &samplerInfo, nullptr, &linearSampler));
+    resourceJanitor.push_back([=](){ vkDestroySampler(ctx->device(), linearSampler, nullptr); });
 
     VkDescriptorImageInfo imageInfo = {};
     imageInfo.sampler = linearSampler;
@@ -331,9 +332,9 @@ void VKlelu::init_scene()
 
     VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, monkeyMat->textureSet, &imageInfo, 0);
 
-    vkUpdateDescriptorSets(ctx->device, 1, &texture, 0, nullptr);
+    vkUpdateDescriptorSets(ctx->device(), 1, &texture, 0, nullptr);
 
-    sceneParameters.lightPos = { 10.0f, 10.0f, 10.0f, 0.0f };
+    sceneParameters.lightPos = { 2.0f, 2.0f, 5.0f, 0.0f };
     sceneParameters.lightColor = { 1.0f, 1.0f, 1.0f, 0.0f };
 }
 
@@ -370,24 +371,24 @@ void VKlelu::upload_mesh(ObjFile &obj, std::string name)
     size_t vertexBufferSize = mesh.numVertices * sizeof(Vertex);
     size_t indexBufferSize = mesh.numIndices * sizeof(uint32_t);
 
-    BufferAllocation stagingBuffer(ctx->allocator, vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    auto stagingBuffer = ctx->allocate_buffer(vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
-    void *data = stagingBuffer.map();
+    void *data = stagingBuffer->map();
     memcpy(data, obj.vertices.data(), vertexBufferSize);
     memcpy((uint8_t *)data + vertexBufferSize, obj.indices.data(), indexBufferSize);
 
-    mesh.vertexBuffer = std::make_unique<BufferAllocation>(ctx->allocator, vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-    mesh.indexBuffer = std::make_unique<BufferAllocation>(ctx->allocator, indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    mesh.vertexBuffer = ctx->allocate_buffer(vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    mesh.indexBuffer = ctx->allocate_buffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
     immediate_submit([&](VkCommandBuffer cmd) {
         VkBufferCopy copy;
         copy.dstOffset = 0;
         copy.srcOffset = 0;
         copy.size = vertexBufferSize;
-        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, mesh.vertexBuffer->buffer, 1, &copy);
+        vkCmdCopyBuffer(cmd, stagingBuffer->buffer(), mesh.vertexBuffer->buffer(), 1, &copy);
         copy.srcOffset = vertexBufferSize;
         copy.size = indexBufferSize;
-        vkCmdCopyBuffer(cmd, stagingBuffer.buffer, mesh.indexBuffer->buffer, 1, &copy);
+        vkCmdCopyBuffer(cmd, stagingBuffer->buffer(), mesh.indexBuffer->buffer(), 1, &copy);
     });
 
     meshes[name] = std::move(mesh);
@@ -399,9 +400,9 @@ void VKlelu::upload_image(ImageFile &image, std::string name)
     VkDeviceSize imageSize = image.width * image.height * 4;
     VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
-    BufferAllocation stagingBuffer(ctx->allocator, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    auto stagingBuffer = ctx->allocate_buffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
-    void *data = stagingBuffer.map();
+    void *data = stagingBuffer->map();
     memcpy(data, image.pixels, imageSize);
 
     VkExtent3D imageExtent;
@@ -409,7 +410,7 @@ void VKlelu::upload_image(ImageFile &image, std::string name)
     imageExtent.height = image.height;
     imageExtent.depth = 1;
 
-    texture.image = std::make_unique<ImageAllocation>(ctx->allocator, imageExtent, imageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    texture.image = ctx->allocate_image(imageExtent, imageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
     immediate_submit([&](VkCommandBuffer cmd) {
         VkImageSubresourceRange range;
@@ -424,7 +425,7 @@ void VKlelu::upload_image(ImageFile &image, std::string name)
         barrier.pNext = nullptr;
         barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.image = texture.image->image;
+        barrier.image = texture.image->image();
         barrier.subresourceRange = range;
         barrier.srcAccessMask = 0;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
@@ -441,7 +442,7 @@ void VKlelu::upload_image(ImageFile &image, std::string name)
         copyRegion.imageSubresource.layerCount = 1;
         copyRegion.imageExtent = imageExtent;
 
-        vkCmdCopyBufferToImage(cmd, stagingBuffer.buffer, texture.image->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
+        vkCmdCopyBufferToImage(cmd, stagingBuffer->buffer(), texture.image->image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
         VkImageMemoryBarrier barrier2 = barrier;
         barrier2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
@@ -469,12 +470,12 @@ void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&functi
 
     VkSubmitInfo submitInfo = submit_info(&cmd);
 
-    VK_CHECK(vkQueueSubmit(ctx->graphicsQueue, 1, &submitInfo, uploadContext.uploadFence));
+    VK_CHECK(vkQueueSubmit(ctx->graphics_queue(), 1, &submitInfo, uploadContext.uploadFence));
 
-    vkWaitForFences(ctx->device, 1, &uploadContext.uploadFence, true, UINT64_MAX);
-    vkResetFences(ctx->device, 1, &uploadContext.uploadFence);
+    vkWaitForFences(ctx->device(), 1, &uploadContext.uploadFence, true, UINT64_MAX);
+    vkResetFences(ctx->device(), 1, &uploadContext.uploadFence);
 
-    vkResetCommandPool(ctx->device, uploadContext.commandPool, 0);
+    vkResetCommandPool(ctx->device(), uploadContext.commandPool, 0);
 }
 
 void VKlelu::load_shader(const char *path, VkShaderModule &module)
@@ -504,16 +505,7 @@ void VKlelu::load_shader(const char *path, VkShaderModule &module)
     createInfo.codeSize = spv_data.size() * sizeof(uint32_t);
     createInfo.pCode = &spv_data[0];
 
-    if (vkCreateShaderModule(ctx->device, &createInfo, nullptr, &module) != VK_SUCCESS) {
+    if (vkCreateShaderModule(ctx->device(), &createInfo, nullptr, &module) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create shader module: " + std::string(path));
     }
-}
-
-size_t VKlelu::pad_uniform_buffer_size(size_t originalSize)
-{
-    size_t minUboAllignment = ctx->physicalDeviceProperties.limits.minUniformBufferOffsetAlignment;
-    size_t alignedSize = originalSize;
-    if (minUboAllignment > 0)
-        alignedSize = (alignedSize + minUboAllignment - 1) & ~(minUboAllignment - 1);
-    return alignedSize;
 }

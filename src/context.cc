@@ -1,5 +1,6 @@
 #include "context.hh"
 
+#include "memory.hh"
 #include "utils.hh"
 
 #include "SDL.h"
@@ -10,15 +11,16 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 #include <stdexcept>
 
 #define REQUIRED_VK_VERSION_MINOR 3
 
 VulkanContext::VulkanContext(SDL_Window *window):
-    instance(VK_NULL_HANDLE),
-    device(VK_NULL_HANDLE),
-    surface(VK_NULL_HANDLE),
-    allocator(VK_NULL_HANDLE)
+    m_instance(VK_NULL_HANDLE),
+    m_device(VK_NULL_HANDLE),
+    m_surface(VK_NULL_HANDLE),
+    m_allocator(VK_NULL_HANDLE)
 {
 #if !defined(NDEBUG)
     auto sysinfo_ret = vkb::SystemInfo::get_system_info();
@@ -46,12 +48,12 @@ VulkanContext::VulkanContext(SDL_Window *window):
     }
 
     vkb::Instance vkb_inst = inst_ret.value();
-    instance = vkb_inst.instance;
+    m_instance = vkb_inst.instance;
 #if !defined(NDEBUG)
-    debugMessenger = vkb_inst.debug_messenger;
+    m_debugMessenger = vkb_inst.debug_messenger;
 #endif
 
-    if (!SDL_Vulkan_CreateSurface(window, instance, &surface)) {
+    if (!SDL_Vulkan_CreateSurface(window, m_instance, &m_surface)) {
         throw std::runtime_error("Failed to create Vulkan surface");
     }
 
@@ -60,7 +62,7 @@ VulkanContext::VulkanContext(SDL_Window *window):
     required13Features.synchronization2 = true;
 
     vkb::PhysicalDeviceSelector selector{ vkb_inst };
-    auto phys_ret = selector.set_surface(surface)
+    auto phys_ret = selector.set_surface(m_surface)
         .set_minimum_version(1, REQUIRED_VK_VERSION_MINOR)
         .set_required_features_13(required13Features)
         .select();
@@ -69,8 +71,8 @@ VulkanContext::VulkanContext(SDL_Window *window):
     }
 
     vkb::PhysicalDevice vkb_phys = phys_ret.value();
-    physicalDevice = vkb_phys.physical_device;
-    physicalDeviceProperties = vkb_phys.properties;
+    m_physicalDevice = vkb_phys.physical_device;
+    m_physicalDeviceProperties = vkb_phys.properties;
 
     VkPhysicalDeviceDriverProperties driverProps = {};
     driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
@@ -79,7 +81,7 @@ VulkanContext::VulkanContext(SDL_Window *window):
     devProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
     devProps2.pNext = &driverProps;
 
-    vkGetPhysicalDeviceProperties2(physicalDevice, &devProps2);
+    vkGetPhysicalDeviceProperties2(m_physicalDevice, &devProps2);
 
     vkb::DeviceBuilder deviceBuilder{ vkb_phys };
     auto dev_ret = deviceBuilder.build();
@@ -88,15 +90,15 @@ VulkanContext::VulkanContext(SDL_Window *window):
     }
 
     vkb::Device vkb_device = dev_ret.value();
-    device = vkb_device.device;
+    m_device = vkb_device.device;
 
     auto graphics_queue_ret = vkb_device.get_queue(vkb::QueueType::graphics);
     if (!graphics_queue_ret) {
         throw std::runtime_error("Failed to get graphics queue. Error: " + graphics_queue_ret.error().message());
     }
 
-    graphicsQueue = graphics_queue_ret.value();
-    graphicsQueueFamily = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
+    m_graphicsQueue = graphics_queue_ret.value();
+    m_graphicsQueueFamily = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
 
     fprintf(stderr, "Selected Vulkan device:\n");
     fprintf(stderr, "  Device name:\t%s\n", devProps2.properties.deviceName);
@@ -107,29 +109,74 @@ VulkanContext::VulkanContext(SDL_Window *window):
                                                   VK_API_VERSION_PATCH(devProps2.properties.apiVersion));
 
     VmaAllocatorCreateInfo allocatorInfo = {};
-    allocatorInfo.instance = instance;
-    allocatorInfo.physicalDevice = physicalDevice;
-    allocatorInfo.device = device;
-    VK_CHECK(vmaCreateAllocator(&allocatorInfo, &allocator));
+    allocatorInfo.instance = m_instance;
+    allocatorInfo.physicalDevice = m_physicalDevice;
+    allocatorInfo.device = m_device;
+    VK_CHECK(vmaCreateAllocator(&allocatorInfo, &m_allocator));
 
     fprintf(stderr, "Vulkan 1.%d initialized\n", REQUIRED_VK_VERSION_MINOR);
 }
 
 VulkanContext::~VulkanContext()
 {
-    if (allocator)
-        vmaDestroyAllocator(allocator);
+    if (m_allocator)
+        vmaDestroyAllocator(m_allocator);
 
-    if (device)
-        vkDestroyDevice(device, nullptr);
+    if (m_device)
+        vkDestroyDevice(m_device, nullptr);
 
-    if (surface)
-        vkDestroySurfaceKHR(instance, surface, nullptr);
+    if (m_surface)
+        vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
 
-    if (instance) {
+    if (m_instance) {
 #if !defined(NDEBUG)
-        vkb::destroy_debug_utils_messenger(instance, debugMessenger);
+        vkb::destroy_debug_utils_messenger(m_instance, m_debugMessenger);
 #endif
-        vkDestroyInstance(instance, nullptr);
+        vkDestroyInstance(m_instance, nullptr);
     }
+}
+
+VkInstance VulkanContext::instance()
+{
+    return m_instance;
+}
+
+VkPhysicalDevice VulkanContext::physical_device()
+{
+    return m_physicalDevice;
+}
+
+VkPhysicalDeviceProperties VulkanContext::physical_device_properties()
+{
+    return m_physicalDeviceProperties;
+}
+
+VkDevice VulkanContext::device()
+{
+    return m_device;
+}
+
+VkSurfaceKHR VulkanContext::surface()
+{
+    return m_surface;
+}
+
+VkQueue VulkanContext::graphics_queue()
+{
+    return m_graphicsQueue;
+}
+
+uint32_t VulkanContext::graphics_queue_family()
+{
+    return m_graphicsQueueFamily;
+}
+
+std::unique_ptr<BufferAllocation> VulkanContext::allocate_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
+{
+    return std::make_unique<BufferAllocation>(m_allocator, size, usage, memoryUsage);
+}
+
+std::unique_ptr<ImageAllocation> VulkanContext::allocate_image(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage)
+{
+    return std::make_unique<ImageAllocation>(m_allocator, extent, format, samples, usage, memoryUsage);
 }

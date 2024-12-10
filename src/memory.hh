@@ -5,35 +5,41 @@
 
 #include <vector>
 
-struct BufferAllocation
+class BufferAllocation
 {
+public:
     BufferAllocation(VmaAllocator allocator, size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
     ~BufferAllocation();
     BufferAllocation(const BufferAllocation &) = delete;
     BufferAllocation &operator=(const BufferAllocation &) = delete;
 
+    VkBuffer buffer();
     void *map();
     void unmap();
 
-    VkBuffer buffer;
-    VmaAllocation allocation;
-    VmaAllocator allocator;
-    bool mapped;
-    void *mapping;
+private:
+    VkBuffer m_buffer;
+    VmaAllocation m_allocation;
+    VmaAllocator m_allocator;
+    bool m_mapped;
+    void *m_mapping;
 };
 
-struct ImageAllocation
+class ImageAllocation
 {
+public:
     ImageAllocation(VmaAllocator allocator, VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage);
     ~ImageAllocation();
     ImageAllocation(const ImageAllocation &) = delete;
     ImageAllocation &operator=(const ImageAllocation &) = delete;
 
+    VkImage image();
     VkImageView create_image_view(VkFormat format, VkImageAspectFlags aspectFlags);
 
-    VkImage image;
-    VmaAllocation allocation;
-    VmaAllocator allocator;
-    VkDevice device;
-    std::vector<VkImageView> imageViews;
+private:
+    VkImage m_image;
+    VmaAllocation m_allocation;
+    VmaAllocator m_allocator;
+    VkDevice m_device;
+    std::vector<VkImageView> m_imageViews;
 };

@@ -75,7 +75,6 @@ private:
     void upload_image(ImageFile &image, std::string name);
     void immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function);
     void load_shader(const char *path, VkShaderModule &module);
-    size_t pad_uniform_buffer_size(size_t originalSize);
 
     void init_vulkan();
     void init_swapchain();
