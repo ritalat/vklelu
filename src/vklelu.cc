@@ -238,7 +238,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
     CameraData cam;
     cam.proj = projection;
     cam.view = view;
-    cam.viewproj = projection * view;
+    cam.viewProj = projection * view;
 
     void *camData = currentFrame.cameraBufferMapping;
     memcpy(camData, &cam, sizeof(cam));
@@ -252,6 +252,7 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
     ObjectData *objectSSBO = (ObjectData *)objData;
     for (size_t i = 0; i < himmelit.size(); ++i) {
         objectSSBO[i].model = himmelit[i].translate * himmelit[i].rotate * himmelit[i].scale;
+        objectSSBO[i].normalMat = glm::transpose(glm::inverse(objectSSBO[i].model));
     }
 
     Mesh *lastMesh = nullptr;
@@ -326,15 +327,18 @@ void VKlelu::init_scene()
     resourceJanitor.push_back([=](){ vkDestroySampler(ctx->device(), linearSampler, nullptr); });
 
     VkDescriptorImageInfo imageInfo = {};
-    imageInfo.sampler = linearSampler;
     imageInfo.imageView = textures["monkey_diffuse"].imageView;
     imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, monkeyMat->textureSet, &imageInfo, 0);
 
-    VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, monkeyMat->textureSet, &imageInfo, 0);
+    VkDescriptorImageInfo imageSamplerInfo = {};
+    imageSamplerInfo.sampler = linearSampler;
+    VkWriteDescriptorSet sampler = write_descriptor_image(VK_DESCRIPTOR_TYPE_SAMPLER, monkeyMat->textureSet, &imageSamplerInfo, 1);
 
-    vkUpdateDescriptorSets(ctx->device(), 1, &texture, 0, nullptr);
+    VkWriteDescriptorSet writeSets[] = { texture, sampler };
+    vkUpdateDescriptorSets(ctx->device(), 2, &writeSets[0], 0, nullptr);
 
-    sceneParameters.lightPos = { 2.0f, 2.0f, 5.0f, 0.0f };
+    sceneParameters.lightPos = { -1.0f, 1.0f, 5.0f, 0.0f };
     sceneParameters.lightColor = { 1.0f, 1.0f, 1.0f, 0.0f };
 }
 

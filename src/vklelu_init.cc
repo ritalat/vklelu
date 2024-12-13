@@ -142,14 +142,16 @@ void VKlelu::init_descriptors()
 
     resourceJanitor.push_back([=](){ vkDestroyDescriptorSetLayout(ctx->device(), objectSetLayout, nullptr); });
 
-    VkDescriptorSetLayoutBinding textureBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 0);
+    VkDescriptorSetLayoutBinding textureBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, VK_SHADER_STAGE_FRAGMENT_BIT, 0);
+    VkDescriptorSetLayoutBinding samplerBind = descriptor_layout_binding(VK_DESCRIPTOR_TYPE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT, 1);
+    VkDescriptorSetLayoutBinding set3Bind[] = { textureBind, samplerBind };
 
     VkDescriptorSetLayoutCreateInfo set3Info = {};
     set3Info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     set3Info.pNext = nullptr;
-    set3Info.bindingCount = 1;
+    set3Info.bindingCount = 2;
     set3Info.flags = 0;
-    set3Info.pBindings = &textureBind;
+    set3Info.pBindings = &set3Bind[0];
 
     VK_CHECK(vkCreateDescriptorSetLayout(ctx->device(), &set3Info, nullptr, &singleTextureSetLayout));
 
@@ -158,7 +160,8 @@ void VKlelu::init_descriptors()
     std::vector<VkDescriptorPoolSize> sizes = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 10 },
                                                 { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 10 },
                                                 { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 10 },
-                                                { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 10 } };
+                                                { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 10 },
+                                                { VK_DESCRIPTOR_TYPE_SAMPLER, 10 } };
 
     VkDescriptorPoolCreateInfo poolInfo = {};
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;

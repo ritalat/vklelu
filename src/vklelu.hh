@@ -41,11 +41,12 @@ struct UploadContext {
 struct CameraData {
     glm::mat4 view;
     glm::mat4 proj;
-    glm::mat4 viewproj;
+    glm::mat4 viewProj;
 };
 
 struct ObjectData {
     glm::mat4 model;
+    glm::mat4 normalMat;
 };
 
 struct SceneData {

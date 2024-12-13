@@ -7,11 +7,12 @@ layout (location = 2) in vec2 inTexCoord;
 layout (set = 0, binding = 0) uniform CameraData {
     mat4 view;
     mat4 proj;
-    mat4 viewproj;
+    mat4 viewProj;
 } cam;
 
 struct ObjectData {
     mat4 model;
+    mat4 normalMat;
 };
 
 layout (set = 1, binding = 0) readonly buffer ObjectBuffer {
@@ -28,10 +29,10 @@ layout (location = 2) out vec2 outTexCoord;
 
 void main()
 {
-    mat4 model = obj.objects[pcs.modelIndex].model;
-    vec4 worldPos = model * vec4(inPosition, 1.0);
+    ObjectData object = obj.objects[pcs.modelIndex];
+    vec4 worldPos = object.model * vec4(inPosition, 1.0);
     outFragPos = vec3(worldPos);
-    outNormal = mat3(transpose(inverse(model))) * inNormal;
+    outNormal = mat3(object.normalMat) * inNormal;
     outTexCoord = inTexCoord;
-    gl_Position = cam.viewproj * worldPos;
+    gl_Position = cam.viewProj * worldPos;
 }
