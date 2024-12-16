@@ -23,11 +23,11 @@ VulkanContext::VulkanContext(SDL_Window *window):
     m_allocator(VK_NULL_HANDLE)
 {
 #if !defined(NDEBUG)
-    auto sysinfo_ret = vkb::SystemInfo::get_system_info();
-    if (!sysinfo_ret) {
-        throw std::runtime_error("Failed to gather system info. Error: " + sysinfo_ret.error().message());
+    auto sysinfoRet = vkb::SystemInfo::get_system_info();
+    if (!sysinfoRet) {
+        throw std::runtime_error("Failed to gather system info. Error: " + sysinfoRet.error().message());
     }
-    auto sysinfo = sysinfo_ret.value();
+    auto sysinfo = sysinfoRet.value();
     if (sysinfo.validation_layers_available) {
         fprintf(stderr, "Enabling Vulkan validation layers\n");
     } else {
@@ -36,21 +36,21 @@ VulkanContext::VulkanContext(SDL_Window *window):
 #endif
 
     vkb::InstanceBuilder builder;
-    auto inst_ret = builder.set_app_name("VKlelu")
+    auto instRet = builder.set_app_name("VKlelu")
 #if !defined(NDEBUG)
         .request_validation_layers()
         .use_default_debug_messenger()
 #endif
         .require_api_version(1, REQUIRED_VK_VERSION_MINOR)
         .build();
-    if (!inst_ret) {
-        throw std::runtime_error("Failed to create Vulkan instance. Error: " + inst_ret.error().message());
+    if (!instRet) {
+        throw std::runtime_error("Failed to create Vulkan instance. Error: " + instRet.error().message());
     }
 
-    vkb::Instance vkb_inst = inst_ret.value();
-    m_instance = vkb_inst.instance;
+    vkb::Instance vkbInst = instRet.value();
+    m_instance = vkbInst.instance;
 #if !defined(NDEBUG)
-    m_debugMessenger = vkb_inst.debug_messenger;
+    m_debugMessenger = vkbInst.debug_messenger;
 #endif
 
     if (!SDL_Vulkan_CreateSurface(window, m_instance, &m_surface)) {
@@ -61,18 +61,18 @@ VulkanContext::VulkanContext(SDL_Window *window):
     required13Features.dynamicRendering = true;
     required13Features.synchronization2 = true;
 
-    vkb::PhysicalDeviceSelector selector{ vkb_inst };
-    auto phys_ret = selector.set_surface(m_surface)
+    vkb::PhysicalDeviceSelector selector{ vkbInst };
+    auto physRet = selector.set_surface(m_surface)
         .set_minimum_version(1, REQUIRED_VK_VERSION_MINOR)
         .set_required_features_13(required13Features)
         .select();
-    if (!phys_ret) {
-        throw std::runtime_error("Failed to select Vulkan physical device. Error: " + phys_ret.error().message());
+    if (!physRet) {
+        throw std::runtime_error("Failed to select Vulkan physical device. Error: " + physRet.error().message());
     }
 
-    vkb::PhysicalDevice vkb_phys = phys_ret.value();
-    m_physicalDevice = vkb_phys.physical_device;
-    m_physicalDeviceProperties = vkb_phys.properties;
+    vkb::PhysicalDevice vkbPhys = physRet.value();
+    m_physicalDevice = vkbPhys.physical_device;
+    m_physicalDeviceProperties = vkbPhys.properties;
 
     VkPhysicalDeviceDriverProperties driverProps = {};
     driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
@@ -83,22 +83,22 @@ VulkanContext::VulkanContext(SDL_Window *window):
 
     vkGetPhysicalDeviceProperties2(m_physicalDevice, &devProps2);
 
-    vkb::DeviceBuilder deviceBuilder{ vkb_phys };
-    auto dev_ret = deviceBuilder.build();
-    if (!dev_ret) {
-        throw std::runtime_error("Failed to create Vulkan device. Error: " + dev_ret.error().message());
+    vkb::DeviceBuilder deviceBuilder{ vkbPhys };
+    auto devRet = deviceBuilder.build();
+    if (!devRet) {
+        throw std::runtime_error("Failed to create Vulkan device. Error: " + devRet.error().message());
     }
 
-    vkb::Device vkb_device = dev_ret.value();
-    m_device = vkb_device.device;
+    vkb::Device vkbDev = devRet.value();
+    m_device = vkbDev.device;
 
-    auto graphics_queue_ret = vkb_device.get_queue(vkb::QueueType::graphics);
-    if (!graphics_queue_ret) {
-        throw std::runtime_error("Failed to get graphics queue. Error: " + graphics_queue_ret.error().message());
+    auto graphicsQueueRet = vkbDev.get_queue(vkb::QueueType::graphics);
+    if (!graphicsQueueRet) {
+        throw std::runtime_error("Failed to get graphics queue. Error: " + graphicsQueueRet.error().message());
     }
 
-    m_graphicsQueue = graphics_queue_ret.value();
-    m_graphicsQueueFamily = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
+    m_graphicsQueue = graphicsQueueRet.value();
+    m_graphicsQueueFamily = vkbDev.get_queue_index(vkb::QueueType::graphics).value();
 
     fprintf(stderr, "Selected Vulkan device:\n");
     fprintf(stderr, "  Device name:\t%s\n", devProps2.properties.deviceName);
@@ -141,12 +141,12 @@ VkInstance VulkanContext::instance()
     return m_instance;
 }
 
-VkPhysicalDevice VulkanContext::physical_device()
+VkPhysicalDevice VulkanContext::physicalDevice()
 {
     return m_physicalDevice;
 }
 
-VkPhysicalDeviceProperties VulkanContext::physical_device_properties()
+VkPhysicalDeviceProperties VulkanContext::physicalDeviceProperties()
 {
     return m_physicalDeviceProperties;
 }
@@ -161,22 +161,22 @@ VkSurfaceKHR VulkanContext::surface()
     return m_surface;
 }
 
-VkQueue VulkanContext::graphics_queue()
+VkQueue VulkanContext::graphicsQueue()
 {
     return m_graphicsQueue;
 }
 
-uint32_t VulkanContext::graphics_queue_family()
+uint32_t VulkanContext::graphicsQueueFamily()
 {
     return m_graphicsQueueFamily;
 }
 
-std::unique_ptr<BufferAllocation> VulkanContext::allocate_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
+std::unique_ptr<BufferAllocation> VulkanContext::allocateBuffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage)
 {
     return std::make_unique<BufferAllocation>(m_allocator, size, usage, memoryUsage);
 }
 
-std::unique_ptr<ImageAllocation> VulkanContext::allocate_image(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage)
+std::unique_ptr<ImageAllocation> VulkanContext::allocateImage(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage)
 {
     return std::make_unique<ImageAllocation>(m_allocator, extent, format, samples, usage, memoryUsage);
 }

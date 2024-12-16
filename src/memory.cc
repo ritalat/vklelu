@@ -65,7 +65,7 @@ ImageAllocation::ImageAllocation(VmaAllocator allocator, VkExtent3D extent, VkFo
     vmaGetAllocatorInfo(m_allocator, &allocatorInfo);
     m_device = allocatorInfo.device;
 
-    VkImageCreateInfo imgInfo = image_create_info(format, usage, extent);
+    VkImageCreateInfo imgInfo = imageCreateInfo(format, usage, extent);
     imgInfo.samples = samples;
 
     VmaAllocationCreateInfo imgAllocInfo = {};
@@ -89,9 +89,9 @@ VkImage ImageAllocation::image()
     return m_image;
 }
 
-VkImageView ImageAllocation::create_image_view(VkFormat format, VkImageAspectFlags aspectFlags)
+VkImageView ImageAllocation::createImageView(VkFormat format, VkImageAspectFlags aspectFlags)
 {
-    VkImageViewCreateInfo viewInfo = imageview_create_info(format, m_image, aspectFlags);
+    VkImageViewCreateInfo viewInfo = imageviewCreateInfo(format, m_image, aspectFlags);
     VkImageView imageView;
     VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &imageView));
 

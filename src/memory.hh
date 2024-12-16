@@ -34,7 +34,7 @@ public:
     ImageAllocation &operator=(const ImageAllocation &) = delete;
 
     VkImage image();
-    VkImageView create_image_view(VkFormat format, VkImageAspectFlags aspectFlags);
+    VkImageView createImageView(VkFormat format, VkImageAspectFlags aspectFlags);
 
 private:
     VkImage m_image;

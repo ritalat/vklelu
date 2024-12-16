@@ -65,59 +65,61 @@ public:
 private:
     void update();
     void draw();
-    void draw_objects(VkCommandBuffer cmd);
-    FrameData &get_current_frame();
+    void drawObjects(VkCommandBuffer cmd);
+    FrameData &getCurrentFrame();
 
-    void init_scene();
-    Material *create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string name);
-    Mesh *get_mesh(const std::string name);
-    Material *get_material(const std::string name);
-    void upload_mesh(ObjFile &obj, std::string name);
-    void upload_image(ImageFile &image, std::string name);
-    void immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function);
-    void load_shader(const char *path, VkShaderModule &module);
+    void initScene();
+    Material *createMaterial(VkPipeline pipeline, VkPipelineLayout layout, const std::string name);
+    Mesh *getMesh(const std::string name);
+    Material *getMaterial(const std::string name);
+    void uploadMesh(ObjFile &obj, std::string name);
+    void uploadImage(ImageFile &image, std::string name);
+    void immediateSubmit(std::function<void(VkCommandBuffer)> &&function);
+    void loadShader(const char *path, VkShaderModule &module);
+    void deferCleanup(std::function<void()> &&cleanupFunc);
 
-    void init_vulkan();
-    void init_swapchain();
-    void init_commands();
-    void init_sync_structures();
-    void init_descriptors();
-    void init_pipelines();
+    void initVulkan();
+    void initSwapchain();
+    void initCommands();
+    void initSyncStructures();
+    void initDescriptors();
+    void initPipelines();
 
-    int frameCount;
+    int m_frameCount;
 
-    SDL_Window *window;
-    VkExtent2D fbSize;
+    SDL_Window *m_window;
+    VkExtent2D m_fbSize;
 
-    std::unique_ptr<VulkanContext> ctx;
+    std::unique_ptr<VulkanContext> m_ctx;
+    VkDevice m_device;
 
-    VkSwapchainKHR swapchain;
-    VkFormat swapchainImageFormat;
-    std::vector<VkImage> swapchainImages;
-    std::vector<VkImageView> swapchainImageViews;
+    VkSwapchainKHR m_swapchain;
+    VkFormat m_swapchainImageFormat;
+    std::vector<VkImage> m_swapchainImages;
+    std::vector<VkImageView> m_swapchainImageViews;
 
-    Texture depthImage;
-    VkFormat depthImageFormat;
+    Texture m_depthImage;
+    VkFormat m_depthImageFormat;
 
-    VkDescriptorPool descriptorPool;
-    VkDescriptorSetLayout globalSetLayout;
-    VkDescriptorSetLayout objectSetLayout;
-    VkDescriptorSetLayout singleTextureSetLayout;
+    VkDescriptorPool m_descriptorPool;
+    VkDescriptorSetLayout m_globalSetLayout;
+    VkDescriptorSetLayout m_objectSetLayout;
+    VkDescriptorSetLayout m_singleTextureSetLayout;
 
-    VkPipeline meshPipeline;
-    VkPipelineLayout meshPipelineLayout;
+    VkPipeline m_meshPipeline;
+    VkPipelineLayout m_meshPipelineLayout;
 
-    std::array<FrameData, MAX_FRAMES_IN_FLIGHT> frameData;
-    SceneData sceneParameters;
-    std::unique_ptr<BufferAllocation> sceneParameterBuffer;
-    void *sceneParameterBufferMapping;
-    UploadContext uploadContext;
-    VkSampler linearSampler;
+    std::array<FrameData, MAX_FRAMES_IN_FLIGHT> m_frameData;
+    SceneData m_sceneParameters;
+    std::unique_ptr<BufferAllocation> m_sceneParameterBuffer;
+    void *m_sceneParameterBufferMapping;
+    UploadContext m_uploadContext;
+    VkSampler m_linearSampler;
 
-    std::vector<Himmeli> himmelit;
-    std::unordered_map<std::string, Mesh> meshes;
-    std::unordered_map<std::string, Material> materials;
-    std::unordered_map<std::string, Texture> textures;
+    std::vector<Himmeli> m_himmelit;
+    std::unordered_map<std::string, Mesh> m_meshes;
+    std::unordered_map<std::string, Material> m_materials;
+    std::unordered_map<std::string, Texture> m_textures;
 
-    std::vector<std::function<void()>> resourceJanitor;
+    std::vector<std::function<void()>> m_resourceJanitor;
 };

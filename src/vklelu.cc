@@ -28,8 +28,8 @@
 #define WINDOW_HEIGHT 768
 
 VKlelu::VKlelu(int argc, char *argv[]):
-    frameCount(0),
-    window(nullptr)
+    m_frameCount(0),
+    m_window(nullptr)
 {
     (void)argc;
     (void)argv;
@@ -50,23 +50,23 @@ VKlelu::VKlelu(int argc, char *argv[]):
         throw std::runtime_error("Failed to init SDL");
     }
 
-    window = SDL_CreateWindow("VKlelu",
-                              SDL_WINDOWPOS_UNDEFINED,
-                              SDL_WINDOWPOS_UNDEFINED,
-                              WINDOW_WIDTH, WINDOW_HEIGHT,
-                              SDL_WINDOW_VULKAN);
-    if (!window) {
+    m_window = SDL_CreateWindow("VKlelu",
+                                SDL_WINDOWPOS_UNDEFINED,
+                                SDL_WINDOWPOS_UNDEFINED,
+                                WINDOW_WIDTH, WINDOW_HEIGHT,
+                                SDL_WINDOW_VULKAN);
+    if (!m_window) {
         throw std::runtime_error("Failed to create SDL window");
     }
 
     int drawableWidth;
     int drawableHeight;
-    SDL_Vulkan_GetDrawableSize(window, &drawableWidth, &drawableHeight);
-    fbSize.width = (uint32_t)drawableWidth;
-    fbSize.height = (uint32_t)drawableHeight;
+    SDL_Vulkan_GetDrawableSize(m_window, &drawableWidth, &drawableHeight);
+    m_fbSize.width = (uint32_t)drawableWidth;
+    m_fbSize.height = (uint32_t)drawableHeight;
 
     fprintf(stderr, "Window size:\t%ux%u\n", WINDOW_WIDTH, WINDOW_HEIGHT);
-    fprintf(stderr, "Drawable size:\t%ux%u\n", fbSize.width, fbSize.height);
+    fprintf(stderr, "Drawable size:\t%ux%u\n", m_fbSize.width, m_fbSize.height);
 
     fprintf(stderr, "Asset directory:\t%s\n", cpath(assetdir()));
     fprintf(stderr, "Shader directory:\t%s\n", cpath(shaderdir()));
@@ -74,22 +74,22 @@ VKlelu::VKlelu(int argc, char *argv[]):
 
 VKlelu::~VKlelu()
 {
-    if (ctx)
-        vkDeviceWaitIdle(ctx->device());
+    if (m_ctx)
+        vkDeviceWaitIdle(m_device);
 
-    for (auto fn = resourceJanitor.rbegin(); fn != resourceJanitor.rend(); ++fn)
+    for (auto fn = m_resourceJanitor.rbegin(); fn != m_resourceJanitor.rend(); ++fn)
         (*fn)();
 
-    if (window)
-        SDL_DestroyWindow(window);
+    if (m_window)
+        SDL_DestroyWindow(m_window);
 
     SDL_Quit();
 }
 
 int VKlelu::run()
 {
-    init_vulkan();
-    init_scene();
+    initVulkan();
+    initScene();
 
     bool quit = false;
     SDL_Event event;
@@ -118,51 +118,51 @@ int VKlelu::run()
 
 void VKlelu::update()
 {
-    for (Himmeli &himmeli : himmelit) {
+    for (Himmeli &himmeli : m_himmelit) {
         himmeli.rotate = glm::rotate(glm::mat4{ 1.0f }, glm::radians(static_cast<float>(SDL_GetTicks()) / 20.0f), glm::vec3(0, 1, 0));
     }
 }
 
 void VKlelu::draw()
 {
-    FrameData &currentFrame = get_current_frame();
+    FrameData &currentFrame = getCurrentFrame();
 
-    VK_CHECK(vkWaitForFences(ctx->device(), 1, &currentFrame.renderFence, true, NS_IN_SEC));
-    VK_CHECK(vkResetFences(ctx->device(), 1, &currentFrame.renderFence));
+    VK_CHECK(vkWaitForFences(m_device, 1, &currentFrame.renderFence, true, NS_IN_SEC));
+    VK_CHECK(vkResetFences(m_device, 1, &currentFrame.renderFence));
 
     uint32_t swapchainImageIndex;
-    VK_CHECK(vkAcquireNextImageKHR(ctx->device(), swapchain, NS_IN_SEC, currentFrame.imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
+    VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, NS_IN_SEC, currentFrame.imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
 
     VK_CHECK(vkResetCommandBuffer(currentFrame.mainCommandBuffer, 0));
 
     VkCommandBuffer cmd = currentFrame.mainCommandBuffer;
 
-    VkCommandBufferBeginInfo cmdBeginInfo = command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VkCommandBufferBeginInfo cmdBeginInfo = commandBufferBeginInfo(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-    image_layout_transition(cmd, swapchainImages[swapchainImageIndex],
-                                 VK_IMAGE_ASPECT_COLOR_BIT,
-                                 VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-                                 0,
-                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                                 VK_IMAGE_LAYOUT_UNDEFINED,
-                                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    imageLayoutTransition(cmd, m_swapchainImages[swapchainImageIndex],
+                               VK_IMAGE_ASPECT_COLOR_BIT,
+                               VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                               0,
+                               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                               VK_IMAGE_LAYOUT_UNDEFINED,
+                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    image_layout_transition(cmd, depthImage.image->image(),
-                                 VK_IMAGE_ASPECT_DEPTH_BIT,
-                                 VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-                                 0,
-                                 VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
-                                 | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                                 VK_IMAGE_LAYOUT_UNDEFINED,
-                                 VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+    imageLayoutTransition(cmd, m_depthImage.image->image(),
+                               VK_IMAGE_ASPECT_DEPTH_BIT,
+                               VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                               0,
+                               VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+                               | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                               VK_IMAGE_LAYOUT_UNDEFINED,
+                               VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     VkRenderingAttachmentInfo colorInfo = {};
     colorInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorInfo.imageView = swapchainImageViews[swapchainImageIndex];
+    colorInfo.imageView = m_swapchainImageViews[swapchainImageIndex];
     colorInfo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -170,7 +170,7 @@ void VKlelu::draw()
 
     VkRenderingAttachmentInfo depthInfo = {};
     depthInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthInfo.imageView = depthImage.imageView;
+    depthInfo.imageView = m_depthImage.imageView;
     depthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -178,7 +178,7 @@ void VKlelu::draw()
 
     VkRenderingInfo renderInfo = {};
     renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderInfo.renderArea.extent = fbSize;
+    renderInfo.renderArea.extent = m_fbSize;
     renderInfo.renderArea.offset = { 0, 0 };
     renderInfo.layerCount = 1;
     renderInfo.colorAttachmentCount = 1;
@@ -187,52 +187,52 @@ void VKlelu::draw()
 
     vkCmdBeginRendering(cmd, &renderInfo);
 
-    draw_objects(cmd);
+    drawObjects(cmd);
 
     vkCmdEndRendering(cmd);
 
-    image_layout_transition(cmd, swapchainImages[swapchainImageIndex],
-                                 VK_IMAGE_ASPECT_COLOR_BIT,
-                                 VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                                 VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                                 VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
-                                 0,
-                                 VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                 VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    imageLayoutTransition(cmd, m_swapchainImages[swapchainImageIndex],
+                               VK_IMAGE_ASPECT_COLOR_BIT,
+                               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
+                               VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                               VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+                               0,
+                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                               VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-    VkSubmitInfo submit = submit_info(&cmd);
+    VkSubmitInfo submit = submitInfo(&cmd);
     submit.pWaitDstStageMask = &waitStage;
     submit.waitSemaphoreCount = 1;
     submit.pWaitSemaphores = &currentFrame.imageAcquiredSemaphore;
     submit.signalSemaphoreCount = 1;
     submit.pSignalSemaphores = &currentFrame.renderSemaphore;
 
-    VK_CHECK(vkQueueSubmit(ctx->graphics_queue(), 1, &submit, currentFrame.renderFence));
+    VK_CHECK(vkQueueSubmit(m_ctx->graphicsQueue(), 1, &submit, currentFrame.renderFence));
 
-    VkPresentInfoKHR presentInfo = present_info();
-    presentInfo.swapchainCount = 1;
-    presentInfo.pSwapchains = &swapchain;
-    presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &currentFrame.renderSemaphore;
-    presentInfo.pImageIndices = &swapchainImageIndex;
+    VkPresentInfoKHR present = presentInfo();
+    present.swapchainCount = 1;
+    present.pSwapchains = &m_swapchain;
+    present.waitSemaphoreCount = 1;
+    present.pWaitSemaphores = &currentFrame.renderSemaphore;
+    present.pImageIndices = &swapchainImageIndex;
 
-    VK_CHECK(vkQueuePresentKHR(ctx->graphics_queue(), &presentInfo));
+    VK_CHECK(vkQueuePresentKHR(m_ctx->graphicsQueue(), &present));
 
-    ++frameCount;
+    ++m_frameCount;
 }
 
-void VKlelu::draw_objects(VkCommandBuffer cmd)
+void VKlelu::drawObjects(VkCommandBuffer cmd)
 {
-    FrameData &currentFrame = get_current_frame();
+    FrameData &currentFrame = getCurrentFrame();
 
     glm::vec3 camera = { 0.0f, 0.0f, -5.0f };
-    sceneParameters.cameraPos = glm::vec4{ camera, 1.0f };
+    m_sceneParameters.cameraPos = glm::vec4{ camera, 1.0f };
     glm::mat4 view = glm::translate(glm::mat4(1.0f), camera);
-    glm::mat4 projection = glm::perspective(glm::radians(70.0f), static_cast<float>(fbSize.width)/static_cast<float>(fbSize.height), 0.1f, 200.0f);
+    glm::mat4 projection = glm::perspective(glm::radians(70.0f), static_cast<float>(m_fbSize.width)/static_cast<float>(m_fbSize.height), 0.1f, 200.0f);
     projection[1][1] *= -1;
 
     CameraData cam;
@@ -243,23 +243,23 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
     void *camData = currentFrame.cameraBufferMapping;
     memcpy(camData, &cam, sizeof(cam));
 
-    char *sceneData = (char *)sceneParameterBufferMapping;
-    int frameIndex = frameCount % MAX_FRAMES_IN_FLIGHT;
+    char *sceneData = (char *)m_sceneParameterBufferMapping;
+    int frameIndex = m_frameCount % MAX_FRAMES_IN_FLIGHT;
     sceneData += sizeof(SceneData) * frameIndex;
-    memcpy(sceneData, &sceneParameters, sizeof(SceneData));
+    memcpy(sceneData, &m_sceneParameters, sizeof(SceneData));
 
     void *objData = currentFrame.objectBufferMapping;;
     ObjectData *objectSSBO = (ObjectData *)objData;
-    for (size_t i = 0; i < himmelit.size(); ++i) {
-        objectSSBO[i].model = himmelit[i].translate * himmelit[i].rotate * himmelit[i].scale;
+    for (size_t i = 0; i < m_himmelit.size(); ++i) {
+        objectSSBO[i].model = m_himmelit[i].translate * m_himmelit[i].rotate * m_himmelit[i].scale;
         objectSSBO[i].normalMat = glm::transpose(glm::inverse(objectSSBO[i].model));
     }
 
     Mesh *lastMesh = nullptr;
     Material *lastMaterial = nullptr;
 
-    for (size_t i = 0; i < himmelit.size(); ++i) {
-        Himmeli &himmeli = himmelit[i];
+    for (size_t i = 0; i < m_himmelit.size(); ++i) {
+        Himmeli &himmeli = m_himmelit[i];
         if (!himmeli.material || !himmeli.mesh)
             continue;
 
@@ -289,85 +289,85 @@ void VKlelu::draw_objects(VkCommandBuffer cmd)
     }
 }
 
-FrameData &VKlelu::get_current_frame()
+FrameData &VKlelu::getCurrentFrame()
 {
-    return frameData[frameCount % MAX_FRAMES_IN_FLIGHT];
+    return m_frameData[m_frameCount % MAX_FRAMES_IN_FLIGHT];
 }
 
-void VKlelu::init_scene()
+void VKlelu::initScene()
 {
     ObjFile monkeyObj("suzanne.obj");
-    upload_mesh(monkeyObj, "monkey");
+    uploadMesh(monkeyObj, "monkey");
 
     ImageFile monkeyTexture("suzanne_uv.png");
-    upload_image(monkeyTexture, "monkey_diffuse");
+    uploadImage(monkeyTexture, "monkey_diffuse");
 
-    create_material(meshPipeline, meshPipelineLayout, "monkey_material");
+    createMaterial(m_meshPipeline, m_meshPipelineLayout, "monkey_material");
 
     Himmeli monkey;
-    monkey.mesh = get_mesh("monkey");
-    monkey.material = get_material("monkey_material");
+    monkey.mesh = getMesh("monkey");
+    monkey.material = getMaterial("monkey_material");
     monkey.scale = glm::mat4{ 1.0f };
     monkey.rotate = glm::mat4{ 1.0f };
     monkey.translate = glm::mat4{ 1.0f };
-    himmelit.push_back(monkey);
+    m_himmelit.push_back(monkey);
 
-    Material *monkeyMat = get_material("monkey_material");
+    Material *monkeyMat = getMaterial("monkey_material");
 
     VkDescriptorSetAllocateInfo allocInfo = {};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.pNext = nullptr;
-    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorPool = m_descriptorPool;
     allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &singleTextureSetLayout;
-    VK_CHECK(vkAllocateDescriptorSets(ctx->device(), &allocInfo, &monkeyMat->textureSet));
+    allocInfo.pSetLayouts = &m_singleTextureSetLayout;
+    VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, &monkeyMat->textureSet));
 
-    VkSamplerCreateInfo samplerInfo = sampler_create_info(VK_FILTER_LINEAR);
-    VK_CHECK(vkCreateSampler(ctx->device(), &samplerInfo, nullptr, &linearSampler));
-    resourceJanitor.push_back([=](){ vkDestroySampler(ctx->device(), linearSampler, nullptr); });
+    VkSamplerCreateInfo samplerInfo = samplerCreateInfo(VK_FILTER_LINEAR);
+    VK_CHECK(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_linearSampler));
+    deferCleanup([=](){ vkDestroySampler(m_device, m_linearSampler, nullptr); });
 
     VkDescriptorImageInfo imageInfo = {};
-    imageInfo.imageView = textures["monkey_diffuse"].imageView;
+    imageInfo.imageView = m_textures["monkey_diffuse"].imageView;
     imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet texture = write_descriptor_image(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, monkeyMat->textureSet, &imageInfo, 0);
+    VkWriteDescriptorSet texture = writeDescriptorImage(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, monkeyMat->textureSet, &imageInfo, 0);
 
     VkDescriptorImageInfo imageSamplerInfo = {};
-    imageSamplerInfo.sampler = linearSampler;
-    VkWriteDescriptorSet sampler = write_descriptor_image(VK_DESCRIPTOR_TYPE_SAMPLER, monkeyMat->textureSet, &imageSamplerInfo, 1);
+    imageSamplerInfo.sampler = m_linearSampler;
+    VkWriteDescriptorSet sampler = writeDescriptorImage(VK_DESCRIPTOR_TYPE_SAMPLER, monkeyMat->textureSet, &imageSamplerInfo, 1);
 
     VkWriteDescriptorSet writeSets[] = { texture, sampler };
-    vkUpdateDescriptorSets(ctx->device(), 2, &writeSets[0], 0, nullptr);
+    vkUpdateDescriptorSets(m_device, 2, &writeSets[0], 0, nullptr);
 
-    sceneParameters.lightPos = { -1.0f, 1.0f, 5.0f, 0.0f };
-    sceneParameters.lightColor = { 1.0f, 1.0f, 1.0f, 0.0f };
+    m_sceneParameters.lightPos = { -1.0f, 1.0f, 5.0f, 0.0f };
+    m_sceneParameters.lightColor = { 1.0f, 1.0f, 1.0f, 0.0f };
 }
 
-Material *VKlelu::create_material(VkPipeline pipeline, VkPipelineLayout layout, const std::string name)
+Material *VKlelu::createMaterial(VkPipeline pipeline, VkPipelineLayout layout, const std::string name)
 {
     Material mat;
     mat.pipeline = pipeline;
     mat.pipelineLayout = layout;
-    materials[name] = mat;
-    return &materials[name];
+    m_materials[name] = mat;
+    return &m_materials[name];
 }
 
-Mesh *VKlelu::get_mesh(const std::string name)
+Mesh *VKlelu::getMesh(const std::string name)
 {
-    auto it = meshes.find(name);
-    if (it == meshes.end())
+    auto it = m_meshes.find(name);
+    if (it == m_meshes.end())
         return nullptr;
     return &(*it).second;
 }
 
-Material *VKlelu::get_material(const std::string name)
+Material *VKlelu::getMaterial(const std::string name)
 {
-    auto it = materials.find(name);
-    if (it == materials.end())
+    auto it = m_materials.find(name);
+    if (it == m_materials.end())
         return nullptr;
     return &(*it).second;
 }
 
-void VKlelu::upload_mesh(ObjFile &obj, std::string name)
+void VKlelu::uploadMesh(ObjFile &obj, std::string name)
 {
     Mesh mesh;
     mesh.numVertices = static_cast<uint32_t>(obj.vertices.size());
@@ -375,16 +375,16 @@ void VKlelu::upload_mesh(ObjFile &obj, std::string name)
     size_t vertexBufferSize = mesh.numVertices * sizeof(Vertex);
     size_t indexBufferSize = mesh.numIndices * sizeof(uint32_t);
 
-    auto stagingBuffer = ctx->allocate_buffer(vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    auto stagingBuffer = m_ctx->allocateBuffer(vertexBufferSize + indexBufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
     void *data = stagingBuffer->map();
     memcpy(data, obj.vertices.data(), vertexBufferSize);
     memcpy((uint8_t *)data + vertexBufferSize, obj.indices.data(), indexBufferSize);
 
-    mesh.vertexBuffer = ctx->allocate_buffer(vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
-    mesh.indexBuffer = ctx->allocate_buffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    mesh.vertexBuffer = m_ctx->allocateBuffer(vertexBufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    mesh.indexBuffer = m_ctx->allocateBuffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
-    immediate_submit([&](VkCommandBuffer cmd) {
+    immediateSubmit([&](VkCommandBuffer cmd) {
         VkBufferCopy copy;
         copy.dstOffset = 0;
         copy.srcOffset = 0;
@@ -395,16 +395,16 @@ void VKlelu::upload_mesh(ObjFile &obj, std::string name)
         vkCmdCopyBuffer(cmd, stagingBuffer->buffer(), mesh.indexBuffer->buffer(), 1, &copy);
     });
 
-    meshes[name] = std::move(mesh);
+    m_meshes[name] = std::move(mesh);
 }
 
-void VKlelu::upload_image(ImageFile &image, std::string name)
+void VKlelu::uploadImage(ImageFile &image, std::string name)
 {
     Texture texture;
     VkDeviceSize imageSize = image.width * image.height * 4;
     VkFormat imageFormat = VK_FORMAT_R8G8B8A8_SRGB;
 
-    auto stagingBuffer = ctx->allocate_buffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
+    auto stagingBuffer = m_ctx->allocateBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_CPU_ONLY);
 
     void *data = stagingBuffer->map();
     memcpy(data, image.pixels, imageSize);
@@ -414,9 +414,9 @@ void VKlelu::upload_image(ImageFile &image, std::string name)
     imageExtent.height = image.height;
     imageExtent.depth = 1;
 
-    texture.image = ctx->allocate_image(imageExtent, imageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
+    texture.image = m_ctx->allocateImage(imageExtent, imageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
-    immediate_submit([&](VkCommandBuffer cmd) {
+    immediateSubmit([&](VkCommandBuffer cmd) {
         VkImageSubresourceRange range;
         range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         range.baseMipLevel = 0;
@@ -457,14 +457,14 @@ void VKlelu::upload_image(ImageFile &image, std::string name)
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier2);
     });
 
-    texture.imageView = texture.image->create_image_view(VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
-    textures[name] = std::move(texture);
+    texture.imageView = texture.image->createImageView(VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
+    m_textures[name] = std::move(texture);
 }
 
-void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&function)
+void VKlelu::immediateSubmit(std::function<void(VkCommandBuffer)> &&function)
 {
-    VkCommandBuffer cmd = uploadContext.commandBuffer;
-    VkCommandBufferBeginInfo cmdBeginInfo = command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VkCommandBuffer cmd = m_uploadContext.commandBuffer;
+    VkCommandBufferBeginInfo cmdBeginInfo = commandBufferBeginInfo(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
@@ -472,19 +472,19 @@ void VKlelu::immediate_submit(std::function<void(VkCommandBuffer cmad)> &&functi
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    VkSubmitInfo submitInfo = submit_info(&cmd);
+    VkSubmitInfo submit = submitInfo(&cmd);
 
-    VK_CHECK(vkQueueSubmit(ctx->graphics_queue(), 1, &submitInfo, uploadContext.uploadFence));
+    VK_CHECK(vkQueueSubmit(m_ctx->graphicsQueue(), 1, &submit, m_uploadContext.uploadFence));
 
-    vkWaitForFences(ctx->device(), 1, &uploadContext.uploadFence, true, UINT64_MAX);
-    vkResetFences(ctx->device(), 1, &uploadContext.uploadFence);
+    vkWaitForFences(m_device, 1, &m_uploadContext.uploadFence, true, UINT64_MAX);
+    vkResetFences(m_device, 1, &m_uploadContext.uploadFence);
 
-    vkResetCommandPool(ctx->device(), uploadContext.commandPool, 0);
+    vkResetCommandPool(m_device, m_uploadContext.commandPool, 0);
 }
 
-void VKlelu::load_shader(const char *path, VkShaderModule &module)
+void VKlelu::loadShader(const char *path, VkShaderModule &module)
 {
-    Path fullPath = get_shader_path(path);
+    Path fullPath = getShaderPath(path);
 
     FILE *f = fopen(cpath(fullPath), "rb");
     if (!f) {
@@ -509,7 +509,12 @@ void VKlelu::load_shader(const char *path, VkShaderModule &module)
     createInfo.codeSize = spv_data.size() * sizeof(uint32_t);
     createInfo.pCode = &spv_data[0];
 
-    if (vkCreateShaderModule(ctx->device(), &createInfo, nullptr, &module) != VK_SUCCESS) {
+    if (vkCreateShaderModule(m_device, &createInfo, nullptr, &module) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create shader module: " + std::string(path));
     }
+}
+
+void VKlelu::deferCleanup(std::function<void()> &&cleanupFunc)
+{
+    m_resourceJanitor.push_back(cleanupFunc);
 }

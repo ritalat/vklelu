@@ -20,7 +20,7 @@ bool Vertex::operator==(const Vertex &other) const {
            texcoord == other.texcoord;
 }
 
-VertexInputDescription Vertex::get_description()
+VertexInputDescription Vertex::getDescription()
 {
     VertexInputDescription description;
 
@@ -62,7 +62,7 @@ size_t std::hash<Vertex>::operator()(const Vertex &vertex) const {
 
 ObjFile::ObjFile(const std::string_view filename)
 {
-    Path objPath = get_asset_path(filename);
+    Path objPath = getAssetPath(filename);
 
     tinyobj::attrib_t attrib;
     std::vector<tinyobj::shape_t> shapes;
@@ -106,7 +106,7 @@ ObjFile::ObjFile(const std::string_view filename)
 
 ImageFile::ImageFile(const std::string_view filename)
 {
-    Path fullPath = get_asset_path(filename);
+    Path fullPath = getAssetPath(filename);
 
     pixels = stbi_load(cpath(fullPath), &width, &height, &channels, STBI_rgb_alpha);
 

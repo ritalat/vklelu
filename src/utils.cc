@@ -33,25 +33,25 @@ Path shaderdir()
     return SHADER_DIR;
 }
 
-Path get_asset_path(std::string_view file)
+Path getAssetPath(std::string_view file)
 {
     return assetdir() / file;
 }
 
-Path get_shader_path(std::string_view file)
+Path getShaderPath(std::string_view file)
 {
     return shaderdir() / file;
 }
 
-void image_layout_transition(VkCommandBuffer cmd,
-                             VkImage image,
-                             VkImageAspectFlags aspectFlags,
-                             VkPipelineStageFlags2 srcStageFlags,
-                             VkAccessFlags srcAccessFlags,
-                             VkPipelineStageFlags2 dstStageFlags,
-                             VkAccessFlags dstAccessFlags,
-                             VkImageLayout oldLayout,
-                             VkImageLayout newLayout)
+void imageLayoutTransition(VkCommandBuffer cmd,
+                           VkImage image,
+                           VkImageAspectFlags aspectFlags,
+                           VkPipelineStageFlags2 srcStageFlags,
+                           VkAccessFlags srcAccessFlags,
+                           VkPipelineStageFlags2 dstStageFlags,
+                           VkAccessFlags dstAccessFlags,
+                           VkImageLayout oldLayout,
+                           VkImageLayout newLayout)
 {
     VkImageSubresourceRange range = {};
     range.aspectMask = aspectFlags;
@@ -81,16 +81,16 @@ void image_layout_transition(VkCommandBuffer cmd,
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
-void PipelineBuilder::use_default_ff()
+void PipelineBuilder::useDefaultFF()
 {
-    inputAssembly = input_assembly_create_info(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
-    rasterizer = rasterization_state_create_info(VK_POLYGON_MODE_FILL);
-    multisampling = multisampling_state_create_info();
-    colorBlendAttachment = color_blend_attachment_state();
-    depthStencil = depth_stencil_create_info(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
+    inputAssembly = inputAssemblyCreateInfo(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
+    rasterizer = rasterizationStateCreateInfo(VK_POLYGON_MODE_FILL);
+    multisampling = multisamplingStateCreateInfo();
+    colorBlendAttachment = colorBlendAttachmentState();
+    depthStencil = depthStencilCreateInfo(VK_TRUE, VK_TRUE, VK_COMPARE_OP_LESS_OR_EQUAL);
 }
 
-VkPipeline PipelineBuilder::build_pipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat)
+VkPipeline PipelineBuilder::buildPipeline(VkDevice device, VkFormat colorFormat, VkFormat depthFormat)
 {
     VkPipelineViewportStateCreateInfo viewportState = {};
     viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;

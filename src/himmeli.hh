@@ -19,7 +19,7 @@ struct VertexInputDescription
 struct Vertex
 {
     bool operator==(const Vertex &other) const;
-    static VertexInputDescription get_description();
+    static VertexInputDescription getDescription();
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 texcoord;

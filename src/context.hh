@@ -18,15 +18,15 @@ public:
     VulkanContext &operator=(const VulkanContext &) = delete;
 
     VkInstance instance();
-    VkPhysicalDevice physical_device();
-    VkPhysicalDeviceProperties physical_device_properties();
+    VkPhysicalDevice physicalDevice();
+    VkPhysicalDeviceProperties physicalDeviceProperties();
     VkDevice device();
     VkSurfaceKHR surface();
-    VkQueue graphics_queue();
-    uint32_t graphics_queue_family();
+    VkQueue graphicsQueue();
+    uint32_t graphicsQueueFamily();
 
-    std::unique_ptr<BufferAllocation> allocate_buffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
-    std::unique_ptr<ImageAllocation> allocate_image(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage);
+    std::unique_ptr<BufferAllocation> allocateBuffer(size_t size, VkBufferUsageFlags usage, VmaMemoryUsage memoryUsage);
+    std::unique_ptr<ImageAllocation> allocateImage(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage);
 
 private:
     VkInstance m_instance;
