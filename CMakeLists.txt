@@ -41,9 +41,27 @@ endforeach()
 
 add_custom_target(Shaders DEPENDS ${SPIRV_BINARIES})
 
+if(MINGW)
+    # Find MinGW runtime libraries (only tested with Arch and MSYS2)
+    set(MINGW_LIB_DIRS /usr/x86_64-w64-mingw32/bin C:/msys64/mingw64/bin)
+    set(CMAKE_FIND_LIBRARY_SUFFIXES .dll)
+    find_library(MINGW_STDCPP_LIB NAMES libstdc++-6 HINTS ${MINGW_LIB_DIRS})
+    if(MINGW_STDCPP_LIB)
+        list(APPEND MINGW_RUNTIME_LIBS "${MINGW_STDCPP_LIB}")
+    endif()
+    find_library(MINGW_GCCSEH_LIB NAMES libgcc_s_seh-1 HINTS ${MINGW_LIB_DIRS})
+    if(MINGW_GCCSEH_LIB)
+        list(APPEND MINGW_RUNTIME_LIBS "${MINGW_GCCSEH_LIB}")
+    endif()
+    find_library(MINGW_WINPTHREAD_LIB NAMES libwinpthread-1 HINTS ${MINGW_LIB_DIRS})
+    if(MINGW_WINPTHREAD_LIB)
+        list(APPEND MINGW_RUNTIME_LIBS "${MINGW_WINPTHREAD_LIB}")
+    endif()
+endif()
+
 add_library(single_header STATIC src/lib_impl.cc)
 set_target_properties(single_header PROPERTIES POSITION_INDEPENDENT_CODE ON)
-target_link_libraries(single_header Vulkan::Vulkan stb VulkanMemoryAllocator)
+target_link_libraries(single_header Vulkan::Vulkan stb tinyobjloader VulkanMemoryAllocator)
 
 set(SOURCES src/context.cc
             src/himmeli.cc
@@ -86,13 +104,20 @@ endif()
 
 add_dependencies(vklelu Shaders)
 target_link_libraries(vklelu Vulkan::Vulkan
-                             SDL2::SDL2
                              SDL2::SDL2main
+                             SDL2::SDL2
                              glm::glm
-                             tinyobjloader
                              vk-bootstrap::vk-bootstrap
                              single_header)
 
 install(TARGETS vklelu SDL2 RUNTIME DESTINATION ".")
 
 install(DIRECTORY assets shaders DESTINATION ".")
+
+if(MINGW)
+    if(MINGW_RUNTIME_LIBS)
+        install(FILES ${MINGW_RUNTIME_LIBS} DESTINATION ".")
+    else()
+        message(WARNING "Remember to copy MinGW runtime libraries!")
+    endif()
+endif()
