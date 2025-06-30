@@ -131,6 +131,8 @@ void VKlelu::draw()
     uint32_t swapchainImageIndex;
     VK_CHECK(vkAcquireNextImageKHR(m_device, m_swapchain, NS_IN_SEC, currentFrame.imageAcquiredSemaphore, nullptr, &swapchainImageIndex));
 
+    SwapchainData &currentImage = m_swapchainData[swapchainImageIndex];
+
     VK_CHECK(vkResetCommandBuffer(currentFrame.mainCommandBuffer, 0));
 
     VkCommandBuffer cmd = currentFrame.mainCommandBuffer;
@@ -139,7 +141,7 @@ void VKlelu::draw()
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
-    imageLayoutTransition(cmd, m_swapchainImages[swapchainImageIndex],
+    imageLayoutTransition(cmd, currentImage.image,
                                VK_IMAGE_ASPECT_COLOR_BIT,
                                VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
                                0,
@@ -160,7 +162,7 @@ void VKlelu::draw()
 
     VkRenderingAttachmentInfo colorInfo = {};
     colorInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorInfo.imageView = m_swapchainImageViews[swapchainImageIndex];
+    colorInfo.imageView = currentImage.imageView;
     colorInfo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -189,7 +191,7 @@ void VKlelu::draw()
 
     vkCmdEndRendering(cmd);
 
-    imageLayoutTransition(cmd, m_swapchainImages[swapchainImageIndex],
+    imageLayoutTransition(cmd, currentImage.image,
                                VK_IMAGE_ASPECT_COLOR_BIT,
                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
@@ -207,7 +209,7 @@ void VKlelu::draw()
     submit.waitSemaphoreCount = 1;
     submit.pWaitSemaphores = &currentFrame.imageAcquiredSemaphore;
     submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &currentFrame.renderSemaphore;
+    submit.pSignalSemaphores = &currentImage.renderSemaphore;
 
     VK_CHECK(vkQueueSubmit(m_ctx->graphicsQueue(), 1, &submit, currentFrame.renderFence));
 
@@ -215,7 +217,7 @@ void VKlelu::draw()
     present.swapchainCount = 1;
     present.pSwapchains = &m_swapchain;
     present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &currentFrame.renderSemaphore;
+    present.pWaitSemaphores = &currentImage.renderSemaphore;
     present.pImageIndices = &swapchainImageIndex;
 
     VK_CHECK(vkQueuePresentKHR(m_ctx->graphicsQueue(), &present));

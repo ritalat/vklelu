@@ -41,13 +41,18 @@ void VKlelu::initSwapchain()
     vkb::Swapchain vkbSwapchain = swapRet.value();
     m_swapchain = vkbSwapchain.swapchain;
     m_swapchainImageFormat = vkbSwapchain.image_format;
-    m_swapchainImages = vkbSwapchain.get_images().value();
-    m_swapchainImageViews = vkbSwapchain.get_image_views().value();
+
+    m_swapchainData.resize(vkbSwapchain.image_count);
+    std::vector<VkImage> swapchainImages = vkbSwapchain.get_images().value();
+    std::vector<VkImageView> swapchainImageViews = vkbSwapchain.get_image_views().value();
+    for (size_t i = 0; i < m_swapchainData.size(); ++i) {
+        m_swapchainData[i].image = swapchainImages[i];
+        m_swapchainData[i].imageView = swapchainImageViews[i];
+
+        deferCleanup([=](){ vkDestroyImageView(m_device, m_swapchainData[i].imageView, nullptr); });
+    }
 
     deferCleanup([=](){ vkDestroySwapchainKHR(m_device, m_swapchain, nullptr); });
-    for (VkImageView swapView : m_swapchainImageViews) {
-        deferCleanup([=](){ vkDestroyImageView(m_device, swapView, nullptr); });
-    }
 
     VkExtent3D imageExtent = {
         m_fbSize.width,
@@ -93,12 +98,19 @@ void VKlelu::initSyncStructures()
 
         VkSemaphoreCreateInfo semaphoreInfo = semaphoreCreateInfo();
         VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_frameData[i].imageAcquiredSemaphore));
-        VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_frameData[i].renderSemaphore));
 
         deferCleanup([=](){
             vkDestroyFence(m_device, m_frameData[i].renderFence, nullptr);
             vkDestroySemaphore(m_device, m_frameData[i].imageAcquiredSemaphore, nullptr);
-            vkDestroySemaphore(m_device, m_frameData[i].renderSemaphore, nullptr);
+        });
+    }
+
+    for (size_t i = 0; i < m_swapchainData.size(); ++i) {
+        VkSemaphoreCreateInfo semaphoreInfo = semaphoreCreateInfo();
+        VK_CHECK(vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_swapchainData[i].renderSemaphore));
+
+        deferCleanup([=](){
+            vkDestroySemaphore(m_device, m_swapchainData[i].renderSemaphore, nullptr);
         });
     }
 

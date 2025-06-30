@@ -22,7 +22,6 @@ struct FrameData {
     VkCommandPool commandPool;
     VkCommandBuffer mainCommandBuffer;
     VkSemaphore imageAcquiredSemaphore;
-    VkSemaphore renderSemaphore;
     VkFence renderFence;
     std::unique_ptr<BufferAllocation> cameraBuffer;
     void *cameraBufferMapping;
@@ -30,6 +29,12 @@ struct FrameData {
     void *objectBufferMapping;
     VkDescriptorSet globalDescriptor;
     VkDescriptorSet objectDescriptor;
+};
+
+struct SwapchainData {
+    VkSemaphore renderSemaphore;
+    VkImage image;
+    VkImageView imageView;
 };
 
 struct UploadContext {
@@ -95,8 +100,7 @@ private:
 
     VkSwapchainKHR m_swapchain;
     VkFormat m_swapchainImageFormat;
-    std::vector<VkImage> m_swapchainImages;
-    std::vector<VkImageView> m_swapchainImageViews;
+    std::vector<SwapchainData> m_swapchainData;
 
     Texture m_depthImage;
     VkFormat m_depthImageFormat;
