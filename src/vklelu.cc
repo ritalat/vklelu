@@ -28,8 +28,7 @@
 #define WINDOW_HEIGHT 768
 
 VKlelu::VKlelu(int argc, char *argv[]):
-    m_frameCount(0),
-    m_window(nullptr)
+    m_frameCount(0)
 {
     (void)argc;
     (void)argv;
@@ -45,17 +44,9 @@ VKlelu::VKlelu(int argc, char *argv[]):
             SDL_VERSIONNUM_MINOR(linked),
             SDL_VERSIONNUM_MICRO(linked));
 
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
-        throw std::runtime_error("Failed to init SDL");
-    }
-
-    m_window = SDL_CreateWindow("VKlelu",
-                                WINDOW_WIDTH,
-                                WINDOW_HEIGHT,
-                                SDL_WINDOW_VULKAN);
-    if (!m_window) {
-        throw std::runtime_error("Failed to create SDL window");
-    }
+    m_ctx = std::make_unique<VulkanContext>(WINDOW_WIDTH, WINDOW_HEIGHT);
+    m_window = m_ctx->window();
+    m_device = m_ctx->device();
 
     int drawableWidth;
     int drawableHeight;
@@ -77,11 +68,6 @@ VKlelu::~VKlelu()
 
     for (auto fn = m_resourceJanitor.rbegin(); fn != m_resourceJanitor.rend(); ++fn)
         (*fn)();
-
-    if (m_window)
-        SDL_DestroyWindow(m_window);
-
-    SDL_Quit();
 }
 
 int VKlelu::run()

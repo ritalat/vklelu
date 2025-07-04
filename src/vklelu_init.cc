@@ -18,8 +18,6 @@
 
 void VKlelu::initVulkan()
 {
-    m_ctx = std::make_unique<VulkanContext>(m_window);
-    m_device = m_ctx->device();
     initSwapchain();
     initCommands();
     initSyncStructures();

@@ -12,11 +12,12 @@
 class VulkanContext
 {
 public:
-    VulkanContext(SDL_Window *window);
+    VulkanContext(int width, int height);
     ~VulkanContext();
     VulkanContext(const VulkanContext &) = delete;
     VulkanContext &operator=(const VulkanContext &) = delete;
 
+    SDL_Window *window();
     VkInstance instance();
     VkPhysicalDevice physicalDevice();
     VkPhysicalDeviceProperties physicalDeviceProperties();
@@ -29,6 +30,7 @@ public:
     std::unique_ptr<ImageAllocation> allocateImage(VkExtent3D extent, VkFormat format, VkSampleCountFlagBits samples, VkImageUsageFlags usage, VmaMemoryUsage memoryUsage);
 
 private:
+    SDL_Window *m_window;
     VkInstance m_instance;
 #if !defined(NDEBUG)
     VkDebugUtilsMessengerEXT m_debugMessenger;

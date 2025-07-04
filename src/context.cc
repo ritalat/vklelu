@@ -16,12 +16,25 @@
 
 #define REQUIRED_VK_VERSION_MINOR 3
 
-VulkanContext::VulkanContext(SDL_Window *window):
+VulkanContext::VulkanContext(int width, int height):
+    m_window(nullptr),
     m_instance(VK_NULL_HANDLE),
     m_device(VK_NULL_HANDLE),
     m_surface(VK_NULL_HANDLE),
     m_allocator(VK_NULL_HANDLE)
 {
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        throw std::runtime_error("Failed to init SDL");
+    }
+
+    m_window = SDL_CreateWindow("VKlelu",
+                                width,
+                                height,
+                                SDL_WINDOW_VULKAN);
+    if (!m_window) {
+        throw std::runtime_error("Failed to create SDL window");
+    }
+
 #if !defined(NDEBUG)
     auto sysinfoRet = vkb::SystemInfo::get_system_info();
     if (!sysinfoRet) {
@@ -53,7 +66,7 @@ VulkanContext::VulkanContext(SDL_Window *window):
     m_debugMessenger = vkbInst.debug_messenger;
 #endif
 
-    if (!SDL_Vulkan_CreateSurface(window, m_instance, NULL, &m_surface)) {
+    if (!SDL_Vulkan_CreateSurface(m_window, m_instance, NULL, &m_surface)) {
         throw std::runtime_error("Failed to create Vulkan surface");
     }
 
@@ -126,7 +139,7 @@ VulkanContext::~VulkanContext()
         vkDestroyDevice(m_device, nullptr);
 
     if (m_surface)
-        vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
+        SDL_Vulkan_DestroySurface(m_instance, m_surface, nullptr);
 
     if (m_instance) {
 #if !defined(NDEBUG)
@@ -134,6 +147,16 @@ VulkanContext::~VulkanContext()
 #endif
         vkDestroyInstance(m_instance, nullptr);
     }
+
+    if (m_window)
+        SDL_DestroyWindow(m_window);
+
+    SDL_Quit();
+}
+
+SDL_Window *VulkanContext::window()
+{
+    return m_window;
 }
 
 VkInstance VulkanContext::instance()
