@@ -23,6 +23,18 @@ void VKlelu::initVulkan()
     initSyncStructures();
     initDescriptors();
     initPipelines();
+
+    immediateSubmit([&](VkCommandBuffer cmd) {
+        imageLayoutTransition(cmd, m_depthImage.image->image(),
+                              VK_IMAGE_ASPECT_DEPTH_BIT,
+                              VK_PIPELINE_STAGE_2_NONE,
+                              0,
+                              VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
+                              | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                              VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                              VK_IMAGE_LAYOUT_UNDEFINED,
+                              VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
+    });
 }
 
 void VKlelu::initSwapchain()

@@ -129,22 +129,12 @@ void VKlelu::draw()
 
     imageLayoutTransition(cmd, currentImage.image,
                                VK_IMAGE_ASPECT_COLOR_BIT,
-                               VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
+                               VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                0,
                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                                VK_IMAGE_LAYOUT_UNDEFINED,
                                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
-    imageLayoutTransition(cmd, m_depthImage.image->image(),
-                               VK_IMAGE_ASPECT_DEPTH_BIT,
-                               VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT,
-                               0,
-                               VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT
-                               | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                               VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                               VK_IMAGE_LAYOUT_UNDEFINED,
-                               VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL);
 
     VkRenderingAttachmentInfo colorInfo = {};
     colorInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
@@ -181,7 +171,7 @@ void VKlelu::draw()
                                VK_IMAGE_ASPECT_COLOR_BIT,
                                VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                                VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                               VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT,
+                               VK_PIPELINE_STAGE_2_NONE,
                                0,
                                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
