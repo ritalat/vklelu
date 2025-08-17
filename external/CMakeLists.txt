@@ -2,9 +2,12 @@ cmake_minimum_required(VERSION 3.16)
 
 add_subdirectory(glm)
 
-set(SDL_STATIC OFF CACHE BOOL "...")
-set(SDL_TEST OFF CACHE BOOL "...")
-add_subdirectory(SDL)
+if(NOT SYSTEM_SDL)
+    set(SDL_STATIC OFF CACHE BOOL "...")
+    set(SDL_TEST OFF CACHE BOOL "...")
+    set(SDL_TEST_LIBRARY OFF CACHE BOOL "...")
+    add_subdirectory(SDL)
+endif()
 
 add_library(stb INTERFACE)
 target_include_directories(stb SYSTEM INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/stb)

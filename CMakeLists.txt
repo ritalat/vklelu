@@ -20,6 +20,12 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_INSTALL_BINDIR ".")
 set(CMAKE_INSTALL_LIBDIR ".")
 
+set(SYSTEM_SDL OFF CACHE BOOL "...")
+
+if(SYSTEM_SDL)
+    find_package(SDL3 REQUIRED)
+endif()
+
 add_subdirectory(external)
 
 find_package(Vulkan REQUIRED COMPONENTS glslc)
@@ -90,7 +96,7 @@ if(WIN32)
                                             VS_DEBUGGER_ENVIRONMENT "${VSENV}")
 endif()
 
-if(UNIX)
+if(UNIX AND NOT SYSTEM_SDL)
     target_link_options(vklelu PUBLIC "-Wl,--enable-new-dtags")
     set_target_properties(vklelu PROPERTIES INSTALL_RPATH "\${ORIGIN}")
 endif()
@@ -109,7 +115,11 @@ target_link_libraries(vklelu Vulkan::Vulkan
                              vk-bootstrap::vk-bootstrap
                              single_header)
 
-install(TARGETS vklelu SDL3-shared RUNTIME DESTINATION ".")
+install(TARGETS vklelu RUNTIME DESTINATION ".")
+
+if(NOT SYSTEM_SDL)
+    install(TARGETS SDL3-shared RUNTIME DESTINATION ".")
+endif()
 
 install(DIRECTORY assets shaders DESTINATION ".")
 
