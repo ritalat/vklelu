@@ -24,31 +24,35 @@ VertexInputDescription Vertex::getDescription()
 {
     VertexInputDescription description;
 
-    VkVertexInputBindingDescription mainBinding = {};
-    mainBinding.binding = 0;
-    mainBinding.stride = sizeof(Vertex);
-    mainBinding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    VkVertexInputBindingDescription mainBinding {
+        .binding = 0,
+        .stride = sizeof(Vertex),
+        .inputRate = VK_VERTEX_INPUT_RATE_VERTEX
+    };
     description.bindings.push_back(mainBinding);
 
-    VkVertexInputAttributeDescription positionAttribute = {};
-    positionAttribute.binding = 0;
-    positionAttribute.location = 0;
-    positionAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    positionAttribute.offset = offsetof(Vertex, position);
+    VkVertexInputAttributeDescription positionAttribute {
+        .location = 0,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, position)
+    };
     description.attributes.push_back(positionAttribute);
 
-    VkVertexInputAttributeDescription normalAttribute = {};
-    normalAttribute.binding = 0;
-    normalAttribute.location = 1;
-    normalAttribute.format = VK_FORMAT_R32G32B32_SFLOAT;
-    normalAttribute.offset = offsetof(Vertex, normal);
+    VkVertexInputAttributeDescription normalAttribute {
+        .location = 1,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32B32_SFLOAT,
+        .offset = offsetof(Vertex, normal)
+    };
     description.attributes.push_back(normalAttribute);
 
-    VkVertexInputAttributeDescription texcoordAttribute = {};
-    texcoordAttribute.binding = 0;
-    texcoordAttribute.location = 2;
-    texcoordAttribute.format = VK_FORMAT_R32G32_SFLOAT;
-    texcoordAttribute.offset = offsetof(Vertex, texcoord);
+    VkVertexInputAttributeDescription texcoordAttribute {
+        .location = 2,
+        .binding = 0,
+        .format = VK_FORMAT_R32G32_SFLOAT,
+        .offset = offsetof(Vertex, texcoord)
+    };
     description.attributes.push_back(texcoordAttribute);
 
     return description;

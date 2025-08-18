@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -80,7 +80,6 @@ set(SOURCES src/context.cc
 set(HEADERS src/context.hh
             src/himmeli.hh
             src/memory.hh
-            src/struct_helpers.hh
             src/utils.hh
             src/vklelu.hh)
 
@@ -106,6 +105,9 @@ if(MSVC)
     target_compile_definitions(vklelu PRIVATE _CRT_SECURE_NO_WARNINGS)
 else()
     target_compile_options(vklelu PRIVATE -Wall -Wextra -Wpedantic -Wconversion)
+    # GCC gives this warning with designated initializers on C++20 but not C
+    # Vulkan structs generally have sane defaults when left zero initialized
+    target_compile_options(vklelu PRIVATE -Wno-missing-field-initializers)
 endif()
 
 add_dependencies(vklelu Shaders)

@@ -3,7 +3,6 @@
 #include "context.hh"
 #include "himmeli.hh"
 #include "memory.hh"
-#include "struct_helpers.hh"
 #include "utils.hh"
 
 #include "glm/glm.hpp"
@@ -123,7 +122,10 @@ void VKlelu::draw()
 
     VkCommandBuffer cmd = currentFrame.mainCommandBuffer;
 
-    VkCommandBufferBeginInfo cmdBeginInfo = commandBufferBeginInfo(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VkCommandBufferBeginInfo cmdBeginInfo {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
@@ -136,30 +138,45 @@ void VKlelu::draw()
                                VK_IMAGE_LAYOUT_UNDEFINED,
                                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    VkRenderingAttachmentInfo colorInfo = {};
-    colorInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    colorInfo.imageView = currentImage.imageView;
-    colorInfo.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    colorInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    colorInfo.clearValue.color = { { 0.0f, 0.0f, 0.5f, 1.0f } };
+    VkClearValue clearColor {
+        .color = { 0.0f, 0.0f, 0.5f, 1.0f }
+    };
 
-    VkRenderingAttachmentInfo depthInfo = {};
-    depthInfo.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
-    depthInfo.imageView = m_depthImage.imageView;
-    depthInfo.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-    depthInfo.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthInfo.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthInfo.clearValue.depthStencil.depth = 1.0f;
+    VkRenderingAttachmentInfo colorInfo {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = currentImage.imageView,
+        .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = clearColor
+    };
 
-    VkRenderingInfo renderInfo = {};
-    renderInfo.sType = VK_STRUCTURE_TYPE_RENDERING_INFO;
-    renderInfo.renderArea.extent = m_fbSize;
-    renderInfo.renderArea.offset = { 0, 0 };
-    renderInfo.layerCount = 1;
-    renderInfo.colorAttachmentCount = 1;
-    renderInfo.pColorAttachments = &colorInfo;
-    renderInfo.pDepthAttachment = &depthInfo;
+    VkClearValue depthValue {
+        .depthStencil = { 1.0f }
+    };
+
+    VkRenderingAttachmentInfo depthInfo {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+        .imageView = m_depthImage.imageView,
+        .imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+        .clearValue = depthValue
+    };
+
+    VkRect2D renderArea {
+        .offset = { 0, 0 },
+        .extent = m_fbSize
+    };
+
+    VkRenderingInfo renderInfo {
+        .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+        .renderArea = renderArea,
+        .layerCount = 1,
+        .colorAttachmentCount = 1,
+        .pColorAttachments = &colorInfo,
+        .pDepthAttachment = &depthInfo
+    };
 
     vkCmdBeginRendering(cmd, &renderInfo);
 
@@ -180,21 +197,27 @@ void VKlelu::draw()
 
     VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
-    VkSubmitInfo submit = submitInfo(&cmd);
-    submit.pWaitDstStageMask = &waitStage;
-    submit.waitSemaphoreCount = 1;
-    submit.pWaitSemaphores = &currentFrame.imageAcquiredSemaphore;
-    submit.signalSemaphoreCount = 1;
-    submit.pSignalSemaphores = &currentImage.renderSemaphore;
+    VkSubmitInfo submit {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &currentFrame.imageAcquiredSemaphore,
+        .pWaitDstStageMask = &waitStage,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd,
+        .signalSemaphoreCount = 1,
+        .pSignalSemaphores = &currentImage.renderSemaphore
+    };
 
     VK_CHECK(vkQueueSubmit(m_ctx->graphicsQueue(), 1, &submit, currentFrame.renderFence));
 
-    VkPresentInfoKHR present = presentInfo();
-    present.swapchainCount = 1;
-    present.pSwapchains = &m_swapchain;
-    present.waitSemaphoreCount = 1;
-    present.pWaitSemaphores = &currentImage.renderSemaphore;
-    present.pImageIndices = &swapchainImageIndex;
+    VkPresentInfoKHR present {
+        .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+        .waitSemaphoreCount = 1,
+        .pWaitSemaphores = &currentImage.renderSemaphore,
+        .swapchainCount = 1,
+        .pSwapchains = &m_swapchain,
+        .pImageIndices = &swapchainImageIndex
+    };
 
     VK_CHECK(vkQueuePresentKHR(m_ctx->graphicsQueue(), &present));
 
@@ -211,10 +234,11 @@ void VKlelu::drawObjects(VkCommandBuffer cmd)
     glm::mat4 projection = glm::perspective(glm::radians(70.0f), static_cast<float>(m_fbSize.width)/static_cast<float>(m_fbSize.height), 0.1f, 200.0f);
     projection[1][1] *= -1;
 
-    CameraData cam;
-    cam.proj = projection;
-    cam.view = view;
-    cam.viewProj = projection * view;
+    CameraData cam {
+        .view = view,
+        .proj = projection,
+        .viewProj = projection * view
+    };
 
     void *camData = currentFrame.cameraBufferMapping;
     memcpy(camData, &cam, sizeof(cam));
@@ -280,36 +304,64 @@ void VKlelu::initScene()
 
     createMaterial(m_meshPipeline, m_meshPipelineLayout, "monkey_material");
 
-    Himmeli monkey;
-    monkey.mesh = getMesh("monkey");
-    monkey.material = getMaterial("monkey_material");
-    monkey.scale = glm::mat4{ 1.0f };
-    monkey.rotate = glm::mat4{ 1.0f };
-    monkey.translate = glm::mat4{ 1.0f };
+    Himmeli monkey {
+        .mesh = getMesh("monkey"),
+        .material = getMaterial("monkey_material"),
+        .scale = glm::mat4{ 1.0f },
+        .rotate = glm::mat4{ 1.0f },
+        .translate = glm::mat4{ 1.0f }
+    };
     m_himmelit.push_back(monkey);
 
     Material *monkeyMat = getMaterial("monkey_material");
 
-    VkDescriptorSetAllocateInfo allocInfo = {};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.pNext = nullptr;
-    allocInfo.descriptorPool = m_descriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &m_singleTextureSetLayout;
+    VkDescriptorSetAllocateInfo allocInfo {
+        .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+        .descriptorPool = m_descriptorPool,
+        .descriptorSetCount = 1,
+        .pSetLayouts = &m_singleTextureSetLayout
+    };
+
     VK_CHECK(vkAllocateDescriptorSets(m_device, &allocInfo, &monkeyMat->textureSet));
 
-    VkSamplerCreateInfo samplerInfo = samplerCreateInfo(VK_FILTER_LINEAR);
+    VkSamplerCreateInfo samplerInfo {
+        .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+        .magFilter = VK_FILTER_LINEAR,
+        .minFilter = VK_FILTER_LINEAR,
+        .addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT,
+        .addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT
+    };
+
     VK_CHECK(vkCreateSampler(m_device, &samplerInfo, nullptr, &m_linearSampler));
-    deferCleanup([=](){ vkDestroySampler(m_device, m_linearSampler, nullptr); });
+    deferCleanup([=, this](){ vkDestroySampler(m_device, m_linearSampler, nullptr); });
 
-    VkDescriptorImageInfo imageInfo = {};
-    imageInfo.imageView = m_textures["monkey_diffuse"].imageView;
-    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    VkWriteDescriptorSet texture = writeDescriptorImage(VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, monkeyMat->textureSet, &imageInfo, 0);
+    VkDescriptorImageInfo imageInfo {
+        .imageView = m_textures["monkey_diffuse"].imageView,
+        .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+    };
 
-    VkDescriptorImageInfo imageSamplerInfo = {};
-    imageSamplerInfo.sampler = m_linearSampler;
-    VkWriteDescriptorSet sampler = writeDescriptorImage(VK_DESCRIPTOR_TYPE_SAMPLER, monkeyMat->textureSet, &imageSamplerInfo, 1);
+    VkWriteDescriptorSet texture {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = monkeyMat->textureSet,
+        .dstBinding = 0,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,
+        .pImageInfo = &imageInfo
+    };
+
+    VkDescriptorImageInfo imageSamplerInfo {
+        .sampler = m_linearSampler
+    };
+
+    VkWriteDescriptorSet sampler {
+        .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+        .dstSet = monkeyMat->textureSet,
+        .dstBinding = 1,
+        .descriptorCount = 1,
+        .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+        .pImageInfo = &imageSamplerInfo
+    };
 
     VkWriteDescriptorSet writeSets[] = { texture, sampler };
     vkUpdateDescriptorSets(m_device, 2, &writeSets[0], 0, nullptr);
@@ -320,9 +372,10 @@ void VKlelu::initScene()
 
 Material *VKlelu::createMaterial(VkPipeline pipeline, VkPipelineLayout layout, const std::string name)
 {
-    Material mat;
-    mat.pipeline = pipeline;
-    mat.pipelineLayout = layout;
+    Material mat {
+        .pipeline = pipeline,
+        .pipelineLayout = layout
+    };
     m_materials[name] = mat;
     return &m_materials[name];
 }
@@ -361,11 +414,13 @@ void VKlelu::uploadMesh(ObjFile &obj, std::string name)
     mesh.indexBuffer = m_ctx->allocateBuffer(indexBufferSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
     immediateSubmit([&](VkCommandBuffer cmd) {
-        VkBufferCopy copy;
-        copy.dstOffset = 0;
-        copy.srcOffset = 0;
-        copy.size = vertexBufferSize;
+        VkBufferCopy copy {
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size = vertexBufferSize
+        };
         vkCmdCopyBuffer(cmd, stagingBuffer->buffer(), mesh.vertexBuffer->buffer(), 1, &copy);
+
         copy.srcOffset = vertexBufferSize;
         copy.size = indexBufferSize;
         vkCmdCopyBuffer(cmd, stagingBuffer->buffer(), mesh.indexBuffer->buffer(), 1, &copy);
@@ -385,50 +440,61 @@ void VKlelu::uploadImage(ImageFile &image, std::string name)
     void *data = stagingBuffer->map();
     memcpy(data, image.pixels, imageSize);
 
-    VkExtent3D imageExtent;
-    imageExtent.width = image.width;
-    imageExtent.height = image.height;
-    imageExtent.depth = 1;
+    VkExtent3D imageExtent {
+        .width = static_cast<uint32_t>(image.width),
+        .height = static_cast<uint32_t>(image.height),
+        .depth = 1
+    };
 
     texture.image = m_ctx->allocateImage(imageExtent, imageFormat, VK_SAMPLE_COUNT_1_BIT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_GPU_ONLY);
 
     immediateSubmit([&](VkCommandBuffer cmd) {
-        VkImageSubresourceRange range;
-        range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        range.baseMipLevel = 0;
-        range.levelCount = 1;
-        range.baseArrayLayer = 0;
-        range.layerCount = 1;
-
-        VkImageMemoryBarrier barrier = {};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.pNext = nullptr;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.image = texture.image->image();
-        barrier.subresourceRange = range;
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        VkImageSubresourceRange range {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        };
+ 
+        VkImageMemoryBarrier barrier {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = 0,
+            .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+            .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .image = texture.image->image(),
+            .subresourceRange = range
+        };
 
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-        VkBufferImageCopy copyRegion = {};
-        copyRegion.bufferOffset = 0;
-        copyRegion.bufferRowLength = 0;
-        copyRegion.bufferImageHeight = 0;
-        copyRegion.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        copyRegion.imageSubresource.mipLevel = 0;
-        copyRegion.imageSubresource.baseArrayLayer = 0;
-        copyRegion.imageSubresource.layerCount = 1;
-        copyRegion.imageExtent = imageExtent;
+        VkImageSubresourceLayers subresource {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .mipLevel = 0,
+            .baseArrayLayer = 0,
+            .layerCount = 1
+        };
+
+        VkBufferImageCopy copyRegion {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .bufferImageHeight = 0,
+            .imageSubresource = subresource,
+            .imageExtent = imageExtent
+        };
 
         vkCmdCopyBufferToImage(cmd, stagingBuffer->buffer(), texture.image->image(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copyRegion);
 
-        VkImageMemoryBarrier barrier2 = barrier;
-        barrier2.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier2.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier2.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier2.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        VkImageMemoryBarrier barrier2 {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = VK_ACCESS_SHADER_READ_BIT,
+            .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+            .image = texture.image->image(),
+            .subresourceRange = range
+        };
 
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier2);
     });
@@ -440,7 +506,10 @@ void VKlelu::uploadImage(ImageFile &image, std::string name)
 void VKlelu::immediateSubmit(std::function<void(VkCommandBuffer)> &&function)
 {
     VkCommandBuffer cmd = m_uploadContext.commandBuffer;
-    VkCommandBufferBeginInfo cmdBeginInfo = commandBufferBeginInfo(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VkCommandBufferBeginInfo cmdBeginInfo {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
 
     VK_CHECK(vkBeginCommandBuffer(cmd, &cmdBeginInfo));
 
@@ -448,7 +517,11 @@ void VKlelu::immediateSubmit(std::function<void(VkCommandBuffer)> &&function)
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
-    VkSubmitInfo submit = submitInfo(&cmd);
+    VkSubmitInfo submit {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .commandBufferCount = 1,
+        .pCommandBuffers = &cmd
+    };
 
     VK_CHECK(vkQueueSubmit(m_ctx->graphicsQueue(), 1, &submit, m_uploadContext.uploadFence));
 
@@ -479,11 +552,11 @@ void VKlelu::loadShader(const char *path, VkShaderModule &module)
         throw std::runtime_error("Failed to read file: " + std::string(path));
     }
 
-    VkShaderModuleCreateInfo createInfo = {};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.pNext = nullptr;
-    createInfo.codeSize = spv_data.size() * sizeof(uint32_t);
-    createInfo.pCode = &spv_data[0];
+    VkShaderModuleCreateInfo createInfo {
+        .sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO,
+        .codeSize = spv_data.size() * sizeof(uint32_t),
+        .pCode = &spv_data[0]
+    };
 
     if (vkCreateShaderModule(m_device, &createInfo, nullptr, &module) != VK_SUCCESS) {
         throw std::runtime_error("Failed to create shader module: " + std::string(path));

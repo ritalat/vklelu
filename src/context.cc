@@ -70,9 +70,10 @@ VulkanContext::VulkanContext(int width, int height):
         throw std::runtime_error("Failed to create Vulkan surface");
     }
 
-    VkPhysicalDeviceVulkan13Features required13Features = {};
-    required13Features.dynamicRendering = true;
-    required13Features.synchronization2 = true;
+    VkPhysicalDeviceVulkan13Features required13Features {
+        .synchronization2 = true,
+        .dynamicRendering = true
+    };
 
     vkb::PhysicalDeviceSelector selector{ vkbInst };
     auto physRet = selector.set_surface(m_surface)
@@ -87,12 +88,14 @@ VulkanContext::VulkanContext(int width, int height):
     m_physicalDevice = vkbPhys.physical_device;
     m_physicalDeviceProperties = vkbPhys.properties;
 
-    VkPhysicalDeviceDriverProperties driverProps = {};
-    driverProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES;
+    VkPhysicalDeviceDriverProperties driverProps {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES
+    };
 
-    VkPhysicalDeviceProperties2 devProps2 = {};
-    devProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
-    devProps2.pNext = &driverProps;
+    VkPhysicalDeviceProperties2 devProps2 {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+        .pNext = &driverProps
+    };
 
     vkGetPhysicalDeviceProperties2(m_physicalDevice, &devProps2);
 
@@ -121,10 +124,12 @@ VulkanContext::VulkanContext(int width, int height):
                                                   VK_API_VERSION_MINOR(devProps2.properties.apiVersion),
                                                   VK_API_VERSION_PATCH(devProps2.properties.apiVersion));
 
-    VmaAllocatorCreateInfo allocatorInfo = {};
-    allocatorInfo.instance = m_instance;
-    allocatorInfo.physicalDevice = m_physicalDevice;
-    allocatorInfo.device = m_device;
+    VmaAllocatorCreateInfo allocatorInfo {
+        .physicalDevice = m_physicalDevice,
+        .device = m_device,
+        .instance = m_instance
+    };
+
     VK_CHECK(vmaCreateAllocator(&allocatorInfo, &m_allocator));
 
     fprintf(stderr, "Vulkan 1.%d initialized\n", REQUIRED_VK_VERSION_MINOR);

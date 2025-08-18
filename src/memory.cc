@@ -1,6 +1,5 @@
 #include "memory.hh"
 
-#include "struct_helpers.hh"
 #include "utils.hh"
 
 #include "vk_mem_alloc.h"
@@ -13,14 +12,15 @@ BufferAllocation::BufferAllocation(VmaAllocator allocator, size_t size, VkBuffer
     m_mapped(false),
     m_mapping(nullptr)
 {
-    VkBufferCreateInfo bufferInfo = {};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.pNext = nullptr;
-    bufferInfo.size = size;
-    bufferInfo.usage = usage;
+    VkBufferCreateInfo bufferInfo {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .size = size,
+        .usage = usage
+    };
 
-    VmaAllocationCreateInfo allocInfo = {};
-    allocInfo.usage = memoryUsage;
+    VmaAllocationCreateInfo allocInfo {
+        .usage = memoryUsage
+    };
 
     VK_CHECK(vmaCreateBuffer(m_allocator, &bufferInfo, &allocInfo, &m_buffer, &m_allocation, nullptr));
 }
@@ -61,16 +61,26 @@ ImageAllocation::ImageAllocation(VmaAllocator allocator, VkExtent3D extent, VkFo
     m_allocator(allocator),
     m_device(VK_NULL_HANDLE)
 {
-    VmaAllocatorInfo allocatorInfo = {};
+    VmaAllocatorInfo allocatorInfo {};
     vmaGetAllocatorInfo(m_allocator, &allocatorInfo);
     m_device = allocatorInfo.device;
 
-    VkImageCreateInfo imgInfo = imageCreateInfo(format, usage, extent);
-    imgInfo.samples = samples;
+    VkImageCreateInfo imgInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+        .imageType = VK_IMAGE_TYPE_2D,
+        .format = format,
+        .extent = extent,
+        .mipLevels = 1,
+        .arrayLayers = 1,
+        .samples = samples,
+        .tiling = VK_IMAGE_TILING_OPTIMAL,
+        .usage = usage
+    };
 
-    VmaAllocationCreateInfo imgAllocInfo = {};
-    imgAllocInfo.usage = memoryUsage;
-    imgAllocInfo.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+    VmaAllocationCreateInfo imgAllocInfo {
+        .usage = memoryUsage,
+        .requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    };
 
     VK_CHECK(vmaCreateImage(m_allocator, &imgInfo, &imgAllocInfo, &m_image, &m_allocation, nullptr));
 }
@@ -91,7 +101,22 @@ VkImage ImageAllocation::image()
 
 VkImageView ImageAllocation::createImageView(VkFormat format, VkImageAspectFlags aspectFlags)
 {
-    VkImageViewCreateInfo viewInfo = imageviewCreateInfo(format, m_image, aspectFlags);
+    VkImageSubresourceRange range {
+        .aspectMask = aspectFlags,
+        .baseMipLevel = 0,
+        .levelCount = 1,
+        .baseArrayLayer = 0,
+        .layerCount = 1
+    };
+
+    VkImageViewCreateInfo viewInfo {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = m_image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = format,
+        .subresourceRange = range
+    };
+
     VkImageView imageView;
     VK_CHECK(vkCreateImageView(m_device, &viewInfo, nullptr, &imageView));
 
